@@ -28,8 +28,23 @@
   .badge.err { background: #f6dedc; color: var(--danger); }
   main {
     display: grid; grid-template-columns: 340px 1fr; gap: 16px;
-    padding: 16px 20px; max-width: 1200px; margin: 0 auto;
+    padding: 0 20px 16px; max-width: 1200px; margin: 0 auto;
   }
+  #statsbar {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+    max-width: 1200px; margin: 0 auto; padding: 16px 20px 12px;
+  }
+  @media (max-width: 800px) { #statsbar { grid-template-columns: repeat(2, 1fr); } }
+  .tile {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; box-shadow: 0 1px 3px rgba(20,40,60,.06);
+  }
+  .tlabel { font-size: 12px; color: var(--muted); }
+  .tvalue { font-size: 20px; font-weight: 600; margin: 2px 0; }
+  .tvalue.big { font-size: 26px; }
+  .tvalue.pos { color: var(--accent); }
+  .tvalue.neg { color: var(--danger); }
+  .tsub { font-size: 11px; color: var(--muted); }
   @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
   .card {
     background: var(--card); border: 1px solid var(--line);
@@ -40,6 +55,12 @@
   label { display: block; font-size: 12px; color: var(--muted); margin-top: 8px; }
   label[title], .checks label[title] { cursor: help; }
   .tt { border-bottom: 1px dotted #9aa8b5; }
+  .psec {
+    margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line);
+    font-size: 11px; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .psec:first-child { margin-top: 0; padding-top: 0; border-top: none; }
   input[type=text], input[type=password], select {
     width: 100%; padding: 6px 8px; margin-top: 2px;
     border: 1px solid var(--line); border-radius: 5px; font: inherit;
@@ -109,6 +130,34 @@
   <span id="uptime" class="badge" style="display:none"></span>
 </header>
 
+<div id="statsbar">
+  <div class="tile" id="tileTotal">
+    <div class="tlabel">Total PnL</div>
+    <div class="tvalue big" id="tTotal">&mdash;</div>
+    <div class="tsub" id="tTotalSub">start the bot to track</div>
+  </div>
+  <div class="tile">
+    <div class="tlabel">Realized</div>
+    <div class="tvalue" id="tRealized">&mdash;</div>
+    <div class="tsub">locked in by completed sells</div>
+  </div>
+  <div class="tile">
+    <div class="tlabel">Unrealized</div>
+    <div class="tvalue" id="tUnrealized">&mdash;</div>
+    <div class="tsub">holdings at current price</div>
+  </div>
+  <div class="tile">
+    <div class="tlabel" id="tQuoteLabel">Quote balance</div>
+    <div class="tvalue" id="tQuote">&mdash;</div>
+    <div class="tsub" id="tQuoteSub">save credentials to load</div>
+  </div>
+  <div class="tile">
+    <div class="tlabel" id="tBaseLabel">Base balance</div>
+    <div class="tvalue" id="tBase">&mdash;</div>
+    <div class="tsub" id="tBaseSub">&nbsp;</div>
+  </div>
+</div>
+
 <main>
 <div>
   <div class="card">
@@ -125,30 +174,63 @@
   </div>
 
   <div class="card">
+    <h2>Strategy &mdash; pick one</h2>
+    <div class="checks">
+      <label title="Rests a ladder of buy orders below the price; every fill is resold one grid level higher, pocketing the step. Best in sideways, choppy markets"><input type="radio" name="strategy" value="grid" checked> <span class="tt">grid strike</span></label>
+      <label title="Market making: continuously quotes buys and sells around the mid price and refreshes them as it moves. Earns the spread while price oscillates"><input type="radio" name="strategy" value="pmm"> <span class="tt">pmm simple</span></label>
+      <label title="Trend following: buys when the Supertrend indicator turns bullish near the trend line, sells the position when it flips bearish. Best in trending markets"><input type="radio" name="strategy" value="supertrend"> <span class="tt">supertrend</span></label>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Parameters</h2>
-    <label title="The market to trade. BTCUSDT means: buy and sell BTC, priced and budgeted in USDT"><span class="tt">Trading pair</span> <input type="text" id="symbol" value="BTCUSDT"></label>
+    <div class="psec">General &mdash; all strategies</div>
     <div class="row2">
-      <label title="Bottom of the grid — the lowest price a buy order can rest at. Absolute price (e.g. 59000) or an offset from the current price (e.g. -3%)"><span class="tt">Grid start price</span> <input type="text" id="grid_start" placeholder="-3% or price"></label>
-      <label title="Top of the grid. Buy levels are spaced evenly between start and end; each fill is resold one level higher"><span class="tt">Grid end price</span> <input type="text" id="grid_end" placeholder="+3% or price"></label>
-    </div>
-    <div class="row2">
-      <label title="Safety cut-off below the grid: if price falls under this, the bot pulls its orders and stops buying instead of catching a falling market"><span class="tt">Limit (stop) price</span> <input type="text" id="grid_limit" placeholder="-5% or price"></label>
-      <label title="How many price levels the grid is split into. More levels = smaller spacing = smaller but more frequent profits per round trip"><span class="tt">Grid levels</span> <input type="text" id="grid_levels" value="8"></label>
-    </div>
-    <div class="row2">
-      <label title="How many buy orders rest on the book at once — the levels nearest below the current price. Others wait their turn"><span class="tt">Max open orders</span> <input type="text" id="grid_max_open" value="3"></label>
-      <label title="Total USDT budget for the strategy, split evenly across the grid levels. With 200 USDT and 8 levels, each order is ~25 USDT"><span class="tt">Total amount (quote)</span> <input type="text" id="total_quote" value="200"></label>
+      <label title="The market to trade. BTCUSDT means: buy and sell BTC, priced and budgeted in USDT"><span class="tt">Trading pair</span> <input type="text" id="symbol" value="BTCUSDT"></label>
+      <label title="Grid/PMM: total budget split evenly across all levels. Supertrend: the amount spent on each entry"><span class="tt">Total amount (quote)</span> <input type="text" id="total_quote" value="200"></label>
     </div>
     <div class="row2">
       <label title="How often (in seconds) the bot re-reads the market and adjusts its orders. Lower = more responsive but more API requests"><span class="tt">Tick interval (s)</span> <input type="text" id="interval" value="10"></label>
-      <label title="Auto-stop after this many seconds and print the reports. Leave blank to run until you press Stop"><span class="tt">Duration (s)</span> <input type="text" id="duration" placeholder="until stopped"></label>
+      <label title="Auto-stop after this many seconds. LEAVE BLANK to keep running until you press Stop (this value is not remembered between visits)"><span class="tt">Duration (s)</span> <input type="text" id="duration" placeholder="blank = until stopped"></label>
     </div>
-    <div class="checks">
-      <label title="Rests a ladder of buy orders below the price; every fill is resold one grid level higher, pocketing the step"><input type="checkbox" id="st_grid" checked> <span class="tt">grid strike</span></label>
-      <label title="Market making: continuously quotes a buy and a sell around the mid price and refreshes them as the price moves"><input type="checkbox" id="st_pmm"> <span class="tt">pmm simple</span></label>
-      <label title="Trend following: buys when the Supertrend indicator turns bullish near the trend line, sells the position when it flips bearish"><input type="checkbox" id="st_supertrend"> <span class="tt">supertrend</span></label>
+
+    <div id="params_grid">
+      <div class="psec">Grid strike</div>
+      <div class="row2">
+        <label title="Bottom of the grid — the lowest price a buy order can rest at. Absolute price (e.g. 59000) or an offset from the current price (e.g. -3%)"><span class="tt">Grid start price</span> <input type="text" id="grid_start" placeholder="-3% or price"></label>
+        <label title="Top of the grid. Buy levels are spaced evenly between start and end; each fill is resold one level higher"><span class="tt">Grid end price</span> <input type="text" id="grid_end" placeholder="+3% or price"></label>
+      </div>
+      <div class="row2">
+        <label title="Safety cut-off below the grid: if price falls under this, the bot pulls its orders and stops buying instead of catching a falling market"><span class="tt">Limit (stop) price</span> <input type="text" id="grid_limit" placeholder="-5% or price"></label>
+        <label title="How many price levels the grid is split into. More levels = smaller spacing = smaller but more frequent profits per round trip"><span class="tt">Grid levels</span> <input type="text" id="grid_levels" value="8"></label>
+      </div>
+      <div class="row2">
+        <label title="How many buy orders rest on the book at once — the levels nearest below the current price. Others wait their turn"><span class="tt">Max open orders</span> <input type="text" id="grid_max_open" value="3"></label>
+        <div></div>
+      </div>
     </div>
-    <div class="checks">
+
+    <div id="params_pmm" style="display:none">
+      <div class="psec">PMM simple</div>
+      <div class="row2">
+        <label title="One buy AND one sell order per spread, so 0.1%,0.3%,0.5% = 6 orders. Each spread is the distance from the mid price"><span class="tt">Spreads (per side)</span> <input type="text" id="pmm_spreads" placeholder="0.1%, 0.3%"></label>
+        <label title="Quotes are cancelled and re-placed after this many seconds, or sooner if the price drifts away from them"><span class="tt">Quote refresh (s)</span> <input type="text" id="pmm_refresh" placeholder="60"></label>
+      </div>
+    </div>
+
+    <div id="params_supertrend" style="display:none">
+      <div class="psec">Supertrend</div>
+      <div class="row2">
+        <label title="How many 3-minute candles the trend calculation looks back over. Longer = smoother, slower to react"><span class="tt">ATR length</span> <input type="text" id="st_length" placeholder="20"></label>
+        <label title="How far the trend line sits from the price. Higher = fewer but more reliable signals, later entries"><span class="tt">ATR multiplier</span> <input type="text" id="st_multiplier" placeholder="4.0"></label>
+      </div>
+      <div class="row2">
+        <label title="Only enter when price is within this distance of the trend line — avoids buying far above support. e.g. 1%"><span class="tt">Entry threshold</span> <input type="text" id="st_threshold" placeholder="1%"></label>
+        <div></div>
+      </div>
+    </div>
+
+    <div class="checks" style="margin-top:12px">
       <label title="Off: the bot only prints what it would do (safe rehearsal). On: orders are actually placed on your Binance demo account"><input type="checkbox" id="trade"> <span class="tt">place real orders on your demo account (off = dry-run)</span></label>
     </div>
     <div class="warn" id="tradeWarn">Real orders need saved credentials.</div>
@@ -192,8 +274,35 @@
 <script>
 const API = `http://${location.hostname}:8801`;
 const $ = id => document.getElementById(id);
+// persisted between visits — note: "duration" is deliberately NOT here, so the
+// bot always defaults to running until you press Stop
 const PARAM_IDS = ["symbol","grid_start","grid_end","grid_limit","grid_levels",
-                   "grid_max_open","total_quote","interval","duration"];
+                   "grid_max_open","pmm_spreads","pmm_refresh",
+                   "st_length","st_multiplier","st_threshold",
+                   "total_quote","interval"];
+const STRATEGY_PARAM_IDS = {
+  grid: ["grid_start","grid_end","grid_limit","grid_levels","grid_max_open"],
+  pmm: ["pmm_spreads","pmm_refresh"],
+  supertrend: ["st_length","st_multiplier","st_threshold"],
+};
+
+function pickedStrategy() {
+  return document.querySelector('input[name="strategy"]:checked').value;
+}
+function showStrategyParams() {
+  const picked = pickedStrategy();
+  for (const key of Object.keys(STRATEGY_PARAM_IDS))
+    $(`params_${key}`).style.display = key === picked ? "" : "none";
+  localStorage.setItem("gridbot-strategy", picked);
+}
+for (const r of document.querySelectorAll('input[name="strategy"]'))
+  r.onchange = showStrategyParams;
+{
+  const saved = localStorage.getItem("gridbot-strategy");
+  const radio = saved && document.querySelector(`input[name="strategy"][value="${saved}"]`);
+  if (radio) radio.checked = true;
+  showStrategyParams();
+}
 let logCursor = 0, apiUp = false, botRunning = false;
 
 // ------- persistence (non-secret params only, in the browser) -------
@@ -226,6 +335,34 @@ function setBadges() {
   }
 }
 
+function signFmt(v, unit) {
+  const s = (v >= 0 ? "+" : "") + v.toFixed(2);
+  return unit ? `${s} ${unit}` : s;
+}
+function paintPnl(el, v) {
+  el.className = el.className.replace(/ (pos|neg)/g, "")
+    + (v > 0.005 ? " pos" : v < -0.005 ? " neg" : "");
+}
+function updateStatsTiles(st) {
+  if (!st) {
+    for (const id of ["tTotal", "tRealized", "tUnrealized"])
+      $(id).textContent = "—";
+    $("tTotalSub").textContent = "start the bot to track";
+    $("tileTotal").title = "";
+    return;
+  }
+  $("tTotal").textContent = signFmt(st.total, st.quote);
+  $("tRealized").textContent = signFmt(st.realized, st.quote);
+  $("tUnrealized").textContent = signFmt(st.unrealized, st.quote);
+  paintPnl($("tTotal"), st.total);
+  paintPnl($("tRealized"), st.realized);
+  paintPnl($("tUnrealized"), st.unrealized);
+  $("tTotalSub").textContent =
+    `${st.fills} fills · ${st.open_orders} open orders · mid ${st.mid.toLocaleString()}`;
+  $("tileTotal").title = Object.entries(st.by_strategy || {})
+    .map(([k, v]) => `${k}: ${signFmt(v, st.quote)}`).join("\n") || "no fills yet";
+}
+
 async function pollStatus() {
   try {
     const s = await api("/api/status");
@@ -234,6 +371,7 @@ async function pollStatus() {
     if (s.running) $("uptime").textContent = `up ${Math.floor(s.uptime_s)}s`;
     $("credsState").textContent = s.credentials_set
       ? "credentials saved (in memory)" : "no credentials saved";
+    updateStatsTiles(s.stats);
   } catch (e) { apiUp = false; botRunning = false; }
   setBadges();
 }
@@ -254,12 +392,12 @@ async function pollLogs() {
 }
 
 function gatherParams() {
-  const strategies = [];
-  if ($("st_grid").checked) strategies.push("grid");
-  if ($("st_pmm").checked) strategies.push("pmm");
-  if ($("st_supertrend").checked) strategies.push("supertrend");
-  const p = { strategies, trade: $("trade").checked };
-  for (const id of PARAM_IDS) { const v = $(id).value.trim(); if (v) p[id] = v; }
+  const picked = pickedStrategy();
+  const p = { strategies: [picked], trade: $("trade").checked };
+  // general params + only the picked strategy's own params
+  const ids = ["symbol","total_quote","interval","duration",
+               ...STRATEGY_PARAM_IDS[picked]];
+  for (const id of ids) { const v = $(id).value.trim(); if (v) p[id] = v; }
   return p;
 }
 
@@ -339,6 +477,20 @@ async function refreshExchange() {
     $("exBalances").textContent = "Balances: " + (d.balances || [])
       .map(b => `${b.asset} ${(+b.free).toFixed(5)}${+b.locked ? ` (+${(+b.locked).toFixed(5)} in orders)` : ""}`)
       .join("  |  ");
+    // balance tiles: quote (spending money) and base (the coin being traded)
+    const QUOTES = ["USDT", "USDC", "FDUSD", "TUSD", "BUSD", "BTC", "ETH", "BNB"];
+    const quote = QUOTES.find(q => sym.endsWith(q) && sym.length > q.length) || "";
+    const base = quote ? sym.slice(0, -quote.length) : "";
+    for (const [asset, vId, lId, sId] of [[quote, "tQuote", "tQuoteLabel", "tQuoteSub"],
+                                          [base, "tBase", "tBaseLabel", "tBaseSub"]]) {
+      const b = (d.balances || []).find(x => x.asset === asset);
+      $(lId).textContent = `${asset || "?"} balance`;
+      $(vId).textContent = b ? (+b.free).toLocaleString(undefined,
+        {maximumFractionDigits: asset === quote ? 2 : 6}) : "0";
+      $(sId).innerHTML = b && +b.locked
+        ? `+ ${(+b.locked).toLocaleString(undefined, {maximumFractionDigits: asset === quote ? 2 : 6})} tied up in orders`
+        : "&nbsp;";
+    }
     const oT = $("exOrders").tBodies[0], tT = $("exTrades").tBodies[0];
     oT.innerHTML = (d.open_orders || []).map(o =>
       rowHTML([o.side, (+o.price).toFixed(2), o.qty,

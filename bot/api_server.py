@@ -57,12 +57,27 @@ def price_spec(value):
     return s
 
 
+def spreads_spec(value):
+    """Comma list of spreads, each a percent ('0.1%') or fraction ('0.001')."""
+    tokens = [t.strip() for t in str(value).split(",") if t.strip()]
+    if not tokens:
+        raise ValueError("empty")
+    for t in tokens:
+        float(t[:-1] if t.endswith("%") else t)
+    return ",".join(tokens)
+
+
 NUMERIC_FLAGS = {
     "grid_start": ("--grid-start", price_spec),
     "grid_end": ("--grid-end", price_spec),
     "grid_limit": ("--grid-limit", price_spec),
     "grid_levels": ("--grid-levels", int),
     "grid_max_open": ("--grid-max-open", int),
+    "pmm_spreads": ("--pmm-spreads", spreads_spec),
+    "pmm_refresh": ("--pmm-refresh", float),
+    "st_length": ("--st-length", int),
+    "st_multiplier": ("--st-multiplier", float),
+    "st_threshold": ("--st-threshold", price_spec),
     "total_quote": ("--total-quote", float),
     "interval": ("--interval", float),
     "duration": ("--duration", float),
@@ -80,6 +95,7 @@ class BotManager:
         self.total_lines = 0
         self.api_key = None
         self.api_secret = None
+        self.bot_stats = None       # last @STATS payload from the bot
 
     # ---------------------------------------------------------------- logging
 
@@ -154,6 +170,7 @@ class BotManager:
                 if running and self.started_at else None,
                 "log_count": self.total_lines,
                 "credentials_set": bool(self.api_key and self.api_secret),
+                "stats": self.bot_stats,
             }
 
     def start(self, params, check=False):
@@ -212,6 +229,7 @@ class BotManager:
                 self.mode = None
                 return False, f"failed to launch bot: {e}"
             self.started_at = time.time()
+            self.bot_stats = None       # fresh session, fresh numbers
             proc = self.proc
         self.log(f"[api] started bot pid={proc.pid} mode={self.mode}")
         threading.Thread(target=self._pump, args=(proc,), daemon=True).start()
@@ -219,6 +237,13 @@ class BotManager:
 
     def _pump(self, proc):
         for line in proc.stdout:
+            if line.startswith("@STATS "):
+                try:
+                    with self.lock:
+                        self.bot_stats = json.loads(line[7:])
+                except ValueError:
+                    pass
+                continue        # machine channel — keep it out of the console
             self.log(line)
         proc.wait()
         self.log(f"[api] bot exited with code {proc.returncode}")

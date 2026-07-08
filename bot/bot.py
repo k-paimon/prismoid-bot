@@ -13,6 +13,7 @@ CONFIG_PASSWORD set. Trading is refused outside Demo Mode; watch the bot's
 orders live at https://demo.binance.com.
 """
 import argparse
+import json
 import os
 import signal
 import sys
@@ -210,13 +211,32 @@ class BotRunner:
     def pnl_for(self, tag):
         return self.pnl_by.setdefault(tag.split("-")[0], PnLTracker())
 
-    def pnl_brief(self, mid):
+    def pnl_totals(self, mid):
         realized = sum((t.realized for t in self.pnl_by.values()), Decimal("0"))
         unreal = sum((t.unrealized(mid) for t in self.pnl_by.values()), Decimal("0"))
         fees = sum((t.fees for t in self.pnl_by.values()), Decimal("0"))
+        return realized, unreal, fees
+
+    def pnl_brief(self, mid):
+        realized, unreal, fees = self.pnl_totals(mid)
         quote = self.filters.get("quote_asset", "") if self.filters else ""
         return (f"PnL {realized + unreal - fees:+.2f} {quote} "
                 f"(realized {realized:+.2f} / unrealized {unreal:+.2f})")
+
+    def emit_stats(self, mid, open_count):
+        """Machine-readable tick stats — parsed by api_server for the dashboard."""
+        realized, unreal, fees = self.pnl_totals(mid)
+        print("@STATS " + json.dumps({
+            "realized": float(realized), "unrealized": float(unreal),
+            "fees": float(fees), "total": float(realized + unreal - fees),
+            "quote": self.filters.get("quote_asset", ""),
+            "base": self.filters.get("base_asset", ""),
+            "mid": float(mid), "open_orders": open_count,
+            "fills": sum(t.buys + t.sells for t in self.pnl_by.values()),
+            "by_strategy": {
+                STRATEGY_NAMES.get(p, p): float(t.realized + t.unrealized(mid) - t.fees)
+                for p, t in self.pnl_by.items()},
+        }), flush=True)
 
     def next_id(self, tag):
         # separator must satisfy Binance's clientOrderId charset [a-zA-Z0-9-_];
@@ -422,6 +442,7 @@ class BotRunner:
               f"{self.pnl_brief(mid)} | "
               f"weight-1m={meter.used_weight_1m} reqs={meter.total_requests}"
               + (f" | ST {st.last_signal}" if st and st.last_signal != 'none' else ""))
+        self.emit_stats(mid, len(open_by_tag))
 
     # ------------------------------------------------------------------- run
 
@@ -518,7 +539,8 @@ def main():
     p.add_argument("--duration", type=float, default=None,
                    help="stop after N seconds and print reports")
     p.add_argument("--total-quote", type=Decimal, default=Decimal("200"),
-                   help="quote budget per maker strategy")
+                   help="quote budget: split across levels for grid/pmm; "
+                        "amount per entry for supertrend")
     p.add_argument("--grid-start", default=None,
                    help="grid lower bound: absolute price or %% offset from the "
                         "startup mid, e.g. 59000 or -3%% (default: -3%%)")
@@ -531,6 +553,18 @@ def main():
     p.add_argument("--grid-levels", type=int, default=8, help="number of grid levels")
     p.add_argument("--grid-max-open", type=int, default=3,
                    help="max simultaneously resting grid orders")
+    p.add_argument("--pmm-spreads", default="0.1%,0.3%",
+                   help="pmm_simple quote spreads per side, comma-separated "
+                        "(e.g. 0.1%%,0.3%%,0.5%% places 3 bids + 3 asks)")
+    p.add_argument("--pmm-refresh", type=float, default=60,
+                   help="pmm_simple quote refresh time in seconds")
+    p.add_argument("--st-length", type=int, default=20,
+                   help="supertrend ATR length (number of 3m candles)")
+    p.add_argument("--st-multiplier", type=float, default=4.0,
+                   help="supertrend ATR multiplier (higher = fewer, later signals)")
+    p.add_argument("--st-threshold", default="1%",
+                   help="supertrend entry threshold: max distance from the trend "
+                        "line, e.g. 1%% (or 0.01)")
     p.add_argument("--keep-orders", action="store_true",
                    help="do not cancel open orders on exit")
     p.add_argument("--credentials-account", default=None)
@@ -586,9 +620,28 @@ def main():
                                   total_amount_quote=args.total_quote,
                                   max_open_orders=args.grid_max_open)
     if "pmm" in wanted:
-        chosen["PMM"] = PMMSimple(total_amount_quote=args.total_quote)
+        spreads = []
+        for tok in args.pmm_spreads.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            value = Decimal(tok[:-1]) / 100 if tok.endswith("%") else Decimal(tok)
+            if not Decimal("0") < value < Decimal("0.2"):
+                sys.exit(f"--pmm-spreads: {tok!r} is out of range — use percent "
+                         f"values like 0.1% (fraction equivalents below 0.2)")
+            spreads.append(value)
+        if not spreads:
+            sys.exit("--pmm-spreads: need at least one spread, e.g. 0.1%,0.3%")
+        chosen["PMM"] = PMMSimple(buy_spreads=spreads, sell_spreads=spreads,
+                                  total_amount_quote=args.total_quote,
+                                  executor_refresh_time=args.pmm_refresh)
     if "supertrend" in wanted:
-        chosen["ST"] = Supertrend()
+        tok = args.st_threshold.strip()
+        threshold = float(tok[:-1]) / 100 if tok.endswith("%") else float(tok)
+        chosen["ST"] = Supertrend(length=args.st_length,
+                                  multiplier=args.st_multiplier,
+                                  percentage_threshold=threshold,
+                                  order_amount_quote=args.total_quote)
     if not chosen:
         sys.exit(f"no valid strategies in '{args.strategies}'")
 
