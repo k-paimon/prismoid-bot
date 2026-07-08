@@ -1,0 +1,1117 @@
+{
+  "config": {
+    "id": "poc-grid-strike",
+    "controller_type": "generic",
+    "controller_name": "grid_strike",
+    "connector_name": "binance_perpetual",
+    "trading_pair": "BTC-USDT",
+    "side": 1,
+    "start_price": 61781.63,
+    "end_price": 65603.17,
+    "limit_price": 59870.86,
+    "total_amount_quote": 1000,
+    "min_spread_between_orders": 0.001,
+    "min_order_amount_quote": 10,
+    "max_open_orders": 3,
+    "order_frequency": 10,
+    "leverage": 20
+  },
+  "summary": {
+    "strategy": "grid_strike",
+    "executors_created": 1,
+    "executors_filled": 1,
+    "net_pnl_quote": -6.9191,
+    "net_pnl_pct": -0.6919,
+    "total_volume_quote": 9426.48,
+    "max_drawdown_usd": -6.9191,
+    "sharpe_ratio": -0.0264,
+    "accuracy": 0.0,
+    "win_signals": 0,
+    "loss_signals": 1
+  },
+  "executors": [
+    {
+      "id": "77zuZU5zuSKHvShac42YqYwKFSBkS8spt8DXzMRcc5hp",
+      "timestamp": 1783362840.0,
+      "type": "grid_executor",
+      "status": "RunnableStatus.TERMINATED",
+      "config": {
+        "id": "77zuZU5zuSKHvShac42YqYwKFSBkS8spt8DXzMRcc5hp",
+        "type": "grid_executor",
+        "timestamp": 1783362840.0,
+        "controller_id": "main",
+        "connector_name": "binance_perpetual",
+        "trading_pair": "BTC-USDT",
+        "start_price": "61781.63",
+        "end_price": "65603.17",
+        "limit_price": "59870.86",
+        "side": "TradeType.BUY",
+        "total_amount_quote": "1000",
+        "min_spread_between_orders": "0.001",
+        "min_order_amount_quote": "10",
+        "max_open_orders": 3,
+        "max_orders_per_batch": 1,
+        "order_frequency": 10,
+        "activation_bounds": null,
+        "safe_extra_spread": "0.0001",
+        "triple_barrier_config": {
+          "stop_loss": null,
+          "take_profit": "0.001",
+          "time_limit": null,
+          "trailing_stop": null,
+          "open_order_type": "OrderType.LIMIT_MAKER",
+          "take_profit_order_type": "OrderType.LIMIT_MAKER",
+          "stop_loss_order_type": "OrderType.MARKET",
+          "time_limit_order_type": "OrderType.MARKET"
+        },
+        "leverage": 20,
+        "level_id": null,
+        "deduct_base_fees": false,
+        "keep_position": false,
+        "coerce_tp_to_step": false
+      },
+      "net_pnl_pct": "-0.00146800546926046195962689555614133496419526636600494384765625",
+      "net_pnl_quote": "-6.9190585747240476166552980430424213409423828125",
+      "cum_fees_quote": "5.65588512000000687152123646228574216365814208984375",
+      "filled_amount_quote": "9426.475199999991673394106328487396240234375",
+      "is_active": false,
+      "is_trading": false,
+      "custom_info": {
+        "close_price": 63976.1,
+        "level_id": null,
+        "side": "TradeType.BUY",
+        "current_position_average_price": 64784.26857142856,
+        "open_order_last_update": 1783362840.0,
+        "fill_events": [
+          {
+            "timestamp": 1783362840.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783362840.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783362840.0,
+            "price": 64511.30142857142,
+            "side": "entry",
+            "level_idx": 10,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783362840.0,
+            "price": 64784.26857142857,
+            "side": "entry",
+            "level_idx": 11,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783362840.0,
+            "price": 65057.235714285714,
+            "side": "entry",
+            "level_idx": 12,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783362840.0,
+            "price": 65330.20285714285,
+            "side": "entry",
+            "level_idx": 13,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783362840.0,
+            "price": 65603.17,
+            "side": "entry",
+            "level_idx": 14,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783362900.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783362960.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783364280.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783365300.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783367940.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783369800.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372140.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372140.0,
+            "price": 64302.57261999999,
+            "side": "tp",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372140.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372140.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372200.0,
+            "price": 64575.81272999999,
+            "side": "tp",
+            "level_idx": 10,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372200.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372200.0,
+            "price": 64302.57261999999,
+            "side": "tp",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372200.0,
+            "price": 64511.30142857142,
+            "side": "entry",
+            "level_idx": 10,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372620.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372740.0,
+            "price": 64302.57261999999,
+            "side": "tp",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372740.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372920.0,
+            "price": 64302.57261999999,
+            "side": "tp",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372920.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783372980.0,
+            "price": 64302.57261999999,
+            "side": "tp",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783373040.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783374600.0,
+            "price": 64302.57261999999,
+            "side": "tp",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783376820.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783378980.0,
+            "price": 64302.57261999999,
+            "side": "tp",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783379040.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783379160.0,
+            "price": 64302.57261999999,
+            "side": "tp",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783379340.0,
+            "price": 64238.334285714285,
+            "side": "entry",
+            "level_idx": 9,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783386240.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783386600.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783386600.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783386660.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783386780.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783387380.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783387500.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783391040.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783391640.0,
+            "price": 63419.432857142856,
+            "side": "entry",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783391700.0,
+            "price": 63482.852289999995,
+            "side": "tp",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783392540.0,
+            "price": 63419.432857142856,
+            "side": "entry",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783395960.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783397520.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783397820.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783398000.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783398180.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783398420.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783399440.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783401180.0,
+            "price": 62873.49857142857,
+            "side": "entry",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783401780.0,
+            "price": 62936.37206999999,
+            "side": "tp",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783402020.0,
+            "price": 62873.49857142857,
+            "side": "entry",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783402200.0,
+            "price": 62936.37206999999,
+            "side": "tp",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783403580.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783403820.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783406040.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783409700.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783415580.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783416540.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783417260.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783422000.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783424160.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783424160.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783424640.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783425900.0,
+            "price": 63482.852289999995,
+            "side": "tp",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783426140.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783426200.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783426260.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783426260.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783426320.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783426560.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783429200.0,
+            "price": 63419.432857142856,
+            "side": "entry",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783430640.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431000.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431000.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431120.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431120.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431180.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431240.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431900.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431900.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783431960.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783432440.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783432800.0,
+            "price": 62873.49857142857,
+            "side": "entry",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783432860.0,
+            "price": 62936.37206999999,
+            "side": "tp",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783433160.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783433160.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783434780.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783434780.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783434840.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783434900.0,
+            "price": 62873.49857142857,
+            "side": "entry",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783434900.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435200.0,
+            "price": 62936.37206999999,
+            "side": "tp",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435200.0,
+            "price": 62873.49857142857,
+            "side": "entry",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435260.0,
+            "price": 62936.37206999999,
+            "side": "tp",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435320.0,
+            "price": 62873.49857142857,
+            "side": "entry",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435380.0,
+            "price": 62936.37206999999,
+            "side": "tp",
+            "level_idx": 4,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435680.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435680.0,
+            "price": 63146.46571428571,
+            "side": "entry",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435740.0,
+            "price": 63209.61217999999,
+            "side": "tp",
+            "level_idx": 5,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435980.0,
+            "price": 63482.852289999995,
+            "side": "tp",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783435980.0,
+            "price": 63419.432857142856,
+            "side": "entry",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783436280.0,
+            "price": 63482.852289999995,
+            "side": "tp",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783436640.0,
+            "price": 63419.432857142856,
+            "side": "entry",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783436700.0,
+            "price": 63482.852289999995,
+            "side": "tp",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783436700.0,
+            "price": 63419.432857142856,
+            "side": "entry",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783436940.0,
+            "price": 63482.852289999995,
+            "side": "tp",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783436940.0,
+            "price": 63419.432857142856,
+            "side": "entry",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783437000.0,
+            "price": 63482.852289999995,
+            "side": "tp",
+            "level_idx": 6,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438080.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438080.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438260.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438260.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438320.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438500.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438560.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438860.0,
+            "price": 63692.399999999994,
+            "side": "entry",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783438920.0,
+            "price": 63756.09239999999,
+            "side": "tp",
+            "level_idx": 7,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783439100.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783439100.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783439220.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783439220.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783439280.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783439340.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783439520.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783439640.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783441500.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783441680.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783442400.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783442520.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783442640.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783443480.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783443720.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783443720.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783443840.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783444500.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783444860.0,
+            "price": 64029.33250999999,
+            "side": "tp",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          },
+          {
+            "timestamp": 1783448880.0,
+            "price": 63965.36714285714,
+            "side": "entry",
+            "level_idx": 8,
+            "amount_quote": 63.6924
+          }
+        ],
+        "grid_level_prices": [
+          61781.63,
+          62054.59714285714,
+          62327.56428571428,
+          62600.53142857143,
+          62873.49857142857,
+          63146.46571428571,
+          63419.432857142856,
+          63692.399999999994,
+          63965.36714285714,
+          64238.334285714285,
+          64511.30142857142,
+          64784.26857142857,
+          65057.235714285714,
+          65330.20285714285,
+          65603.17
+        ],
+        "grid_tp_prices": [
+          61843.41162999999,
+          62116.651739999994,
+          62389.891849999985,
+          62663.13195999999,
+          62936.37206999999,
+          63209.61217999999,
+          63482.852289999995,
+          63756.09239999999,
+          64029.33250999999,
+          64302.57261999999,
+          64575.81272999999,
+          64849.05283999999,
+          65122.292949999995,
+          65395.53305999999,
+          65668.77316999999
+        ],
+        "grid_side": "BUY",
+        "grid_limit_price": 59870.86
+      },
+      "close_timestamp": 1783449120.0,
+      "close_type": "CloseType.TIME_LIMIT",
+      "controller_id": null,
+      "side": "TradeType.BUY"
+    }
+  ]
+}

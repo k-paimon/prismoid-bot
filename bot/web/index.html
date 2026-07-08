@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grid Strike Bot - Binance Testnet</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --ink: #1c2733; --muted: #6b7a8c;
+    --line: #dde4ea; --accent: #0b6e4f; --danger: #b3352b;
+    --console-bg: #10161d; --console-ink: #c8d4e0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    background: var(--card); border-bottom: 1px solid var(--line);
+    padding: 12px 20px; display: flex; align-items: center; gap: 14px;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .badge {
+    padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: #e6ebf0; color: var(--muted);
+  }
+  .badge.on  { background: #d9efe6; color: var(--accent); }
+  .badge.err { background: #f6dedc; color: var(--danger); }
+  main {
+    display: grid; grid-template-columns: 340px 1fr; gap: 16px;
+    padding: 16px 20px; max-width: 1200px; margin: 0 auto;
+  }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase;
+             letter-spacing: .04em; color: var(--muted); }
+  label { display: block; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 6px 8px; margin-top: 2px;
+    border: 1px solid var(--line); border-radius: 5px; font: inherit;
+    background: var(--card); color: var(--ink);
+  }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .checks { margin-top: 8px; font-size: 13px; }
+  .checks label { display: inline-flex; gap: 5px; margin: 0 12px 0 0;
+                  color: var(--ink); font-size: 13px; align-items: center; }
+  button {
+    font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    cursor: pointer; margin: 10px 6px 0 0;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger  { background: var(--danger); border-color: var(--danger); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .hint a { color: inherit; }
+  #console {
+    background: var(--console-bg); color: var(--console-ink);
+    font: 12px/1.5 Consolas, Menlo, monospace; border-radius: 8px;
+    padding: 12px; height: 380px; overflow-y: auto; white-space: pre-wrap;
+    word-break: break-all;
+  }
+  table.mini {
+    width: 100%; border-collapse: collapse;
+    font: 11px/1.5 Consolas, Menlo, monospace;
+  }
+  table.mini td, table.mini th {
+    border-bottom: 1px solid var(--line); padding: 2px 6px 2px 0;
+    text-align: left; white-space: nowrap;
+  }
+  .buy { color: var(--accent); font-weight: 600; }
+  .sell { color: var(--danger); font-weight: 600; }
+  .warn { background: #fdf3d7; border: 1px solid #ecd9a0; border-radius: 6px;
+          padding: 8px 10px; font-size: 12px; margin-top: 10px; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Grid Strike Bot &mdash; Binance Spot Testnet</h1>
+  <span id="apiBadge" class="badge">API: checking...</span>
+  <span id="botBadge" class="badge">bot: idle</span>
+  <span id="uptime" class="badge" style="display:none"></span>
+</header>
+
+<main>
+<div>
+  <div class="card">
+    <h2>Credentials</h2>
+    <label>API key <input type="text" id="apiKey" autocomplete="off"></label>
+    <label>API secret <input type="password" id="apiSecret" autocomplete="off"></label>
+    <button id="saveCreds">Save credentials</button>
+    <button id="clearCreds">Clear</button>
+    <div class="hint" id="credsState">no credentials saved</div>
+    <div class="hint">Testnet keys:
+      <a href="https://testnet.binance.vision" target="_blank">testnet.binance.vision</a>
+      (GitHub login). Demo Mode keys: log into Binance, switch to
+      <a href="https://demo.binance.com" target="_blank">Demo Trading</a>, then
+      create a key in API Management. Held in the API process memory only.</div>
+  </div>
+
+  <div class="card">
+    <h2>Parameters</h2>
+    <label>Venue
+      <select id="venue">
+        <option value="testnet">Spot Testnet (API-only, keys: testnet.binance.vision)</option>
+        <option value="demo">Demo Mode (watch orders at demo.binance.com)</option>
+      </select>
+    </label>
+    <label>Trading pair <input type="text" id="symbol" value="BTCUSDT"></label>
+    <div class="row2">
+      <label>Grid start price <input type="text" id="grid_start" placeholder="-3% or price"></label>
+      <label>Grid end price <input type="text" id="grid_end" placeholder="+3% or price"></label>
+    </div>
+    <div class="row2">
+      <label>Limit (stop) price <input type="text" id="grid_limit" placeholder="-5% or price"></label>
+      <label>Grid levels <input type="text" id="grid_levels" value="8"></label>
+    </div>
+    <div class="row2">
+      <label>Max open orders <input type="text" id="grid_max_open" value="3"></label>
+      <label>Total amount (quote) <input type="text" id="total_quote" value="200"></label>
+    </div>
+    <div class="row2">
+      <label>Tick interval (s) <input type="text" id="interval" value="10"></label>
+      <label>Duration (s) <input type="text" id="duration" placeholder="until stopped"></label>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" id="st_grid" checked> grid strike</label>
+      <label><input type="checkbox" id="st_pmm"> pmm simple</label>
+      <label><input type="checkbox" id="st_supertrend"> supertrend</label>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" id="trade"> place real testnet orders (off = dry-run)</label>
+    </div>
+    <div class="warn" id="tradeWarn">Real orders need saved credentials.</div>
+  </div>
+
+  <div class="card">
+    <h2>Control</h2>
+    <button id="checkBtn">Test connection</button>
+    <button id="startBtn" class="primary">Start bot</button>
+    <button id="stopBtn" class="danger" disabled>Stop</button>
+    <div class="hint">Stop cancels the bot's open orders and prints the request report.</div>
+  </div>
+</div>
+
+<div>
+  <div class="card">
+    <h2>Console</h2>
+    <div id="console">waiting for the bot API...</div>
+  </div>
+  <div class="card" style="margin-bottom:0">
+    <h2>On the exchange &mdash; live from Binance
+      <button id="exchangeRefresh" style="margin:0 0 0 8px;padding:2px 8px;font-size:11px">refresh</button>
+    </h2>
+    <div class="hint" style="margin:0 0 8px">Queried directly from Binance's API
+      (order/trade IDs are Binance's own) &mdash; independent proof of what the bot did.</div>
+    <div id="exBalances" class="hint">save credentials to enable</div>
+    <div class="row2" style="margin-top:8px; align-items:start">
+      <div>
+        <div class="hint" style="font-weight:600">Open orders on the book</div>
+        <table class="mini" id="exOrders"><tbody></tbody></table>
+      </div>
+      <div>
+        <div class="hint" style="font-weight:600">Executed trades (newest first)</div>
+        <table class="mini" id="exTrades"><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+</main>
+
+<script>
+const API = `http://${location.hostname}:8801`;
+const $ = id => document.getElementById(id);
+const PARAM_IDS = ["venue","symbol","grid_start","grid_end","grid_limit","grid_levels",
+                   "grid_max_open","total_quote","interval","duration"];
+let logCursor = 0, apiUp = false, botRunning = false;
+
+// ------- persistence (non-secret params only, in the browser) -------
+try {
+  const saved = JSON.parse(localStorage.getItem("gridbot-params") || "{}");
+  for (const id of PARAM_IDS) if (saved[id] !== undefined) $(id).value = saved[id];
+} catch (e) {}
+function persist() {
+  const out = {};
+  for (const id of PARAM_IDS) out[id] = $(id).value;
+  localStorage.setItem("gridbot-params", JSON.stringify(out));
+}
+
+async function api(path, opts) {
+  const resp = await fetch(API + path, opts);
+  return resp.json();
+}
+
+function setBadges() {
+  const a = $("apiBadge"), b = $("botBadge");
+  a.textContent = apiUp ? "API: online" : "API: offline";
+  a.className = "badge " + (apiUp ? "on" : "err");
+  b.textContent = "bot: " + (botRunning ? window._mode || "running" : "idle");
+  b.className = "badge " + (botRunning ? "on" : "");
+  $("startBtn").disabled = !apiUp || botRunning;
+  $("checkBtn").disabled = !apiUp || botRunning;
+  $("stopBtn").disabled  = !apiUp || !botRunning;
+}
+
+async function pollStatus() {
+  try {
+    const s = await api("/api/status");
+    apiUp = true; botRunning = s.running; window._mode = s.mode;
+    $("uptime").style.display = s.running ? "" : "none";
+    if (s.running) $("uptime").textContent = `up ${Math.floor(s.uptime_s)}s`;
+    $("credsState").textContent = s.credentials_set
+      ? "credentials saved (in memory)" : "no credentials saved";
+  } catch (e) { apiUp = false; botRunning = false; }
+  setBadges();
+}
+
+async function pollLogs() {
+  if (!apiUp) return;
+  try {
+    const r = await api(`/api/logs?since=${logCursor}`);
+    if (logCursor === 0 && r.lines.length) $("console").textContent = "";
+    if (r.lines.length) {
+      const el = $("console");
+      const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+      el.textContent += r.lines.join("\n") + "\n";
+      if (stick) el.scrollTop = el.scrollHeight;
+    }
+    logCursor = r.next;
+  } catch (e) {}
+}
+
+function gatherParams() {
+  const strategies = [];
+  if ($("st_grid").checked) strategies.push("grid");
+  if ($("st_pmm").checked) strategies.push("pmm");
+  if ($("st_supertrend").checked) strategies.push("supertrend");
+  const p = { strategies, trade: $("trade").checked };
+  for (const id of PARAM_IDS) { const v = $(id).value.trim(); if (v) p[id] = v; }
+  return p;
+}
+
+async function post(path, body) {
+  const r = await api(path, {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body || {})});
+  if (!r.ok && r.message) {
+    $("console").textContent += `\n[ui] ${r.message}\n`;
+    $("console").scrollTop = $("console").scrollHeight;
+  }
+  return r;
+}
+
+$("saveCreds").onclick = async () => {
+  await post("/api/credentials",
+             {api_key: $("apiKey").value, api_secret: $("apiSecret").value});
+  $("apiSecret").value = "";
+  pollStatus();
+};
+$("clearCreds").onclick = async () => {
+  await fetch(API + "/api/credentials", {method: "DELETE"});
+  pollStatus();
+};
+$("checkBtn").onclick = () => { persist(); post("/api/check", gatherParams()); };
+$("startBtn").onclick = () => {
+  persist();
+  const p = gatherParams();
+  if (p.trade) { /* server enforces credentials; warn early too */ }
+  post("/api/start", p);
+};
+$("stopBtn").onclick = () => post("/api/stop");
+$("trade").onchange = async () => {
+  const s = apiUp ? await api("/api/status") : {credentials_set: false};
+  $("tradeWarn").style.display =
+    $("trade").checked && !s.credentials_set ? "block" : "none";
+};
+
+// ------- exchange proof panel: data straight from Binance's API -------
+function fmtTime(ms) { return new Date(ms).toLocaleTimeString(); }
+function rowHTML(cells, cls) {
+  return `<tr>${cells.map((c, i) =>
+    `<td${i === 0 && cls ? ` class="${cls}"` : ""}>${c}</td>`).join("")}</tr>`;
+}
+async function refreshExchange() {
+  if (!apiUp) return;
+  try {
+    const sym = $("symbol").value.trim().toUpperCase() || "BTCUSDT";
+    const d = await api(`/api/exchange?symbol=${encodeURIComponent(sym)}`
+                        + `&venue=${encodeURIComponent($("venue").value)}`);
+    if (d.error) { $("exBalances").textContent = d.error; return; }
+    $("exBalances").textContent = "Balances: " + (d.balances || [])
+      .map(b => `${b.asset} ${(+b.free).toFixed(5)}${+b.locked ? ` (+${(+b.locked).toFixed(5)} in orders)` : ""}`)
+      .join("  |  ");
+    const oT = $("exOrders").tBodies[0], tT = $("exTrades").tBodies[0];
+    oT.innerHTML = (d.open_orders || []).map(o =>
+      rowHTML([o.side, (+o.price).toFixed(2), o.qty,
+               `#${o.orderId}`, o.clientOrderId],
+              o.side === "BUY" ? "buy" : "sell")).join("")
+      || "<tr><td class='hint'>none resting</td></tr>";
+    tT.innerHTML = (d.trades || []).map(t =>
+      rowHTML([t.side, (+t.price).toFixed(2), t.qty,
+               `trade #${t.tradeId}`, fmtTime(t.time)],
+              t.side === "BUY" ? "buy" : "sell")).join("")
+      || "<tr><td class='hint'>no trades yet</td></tr>";
+  } catch (e) {}
+}
+$("exchangeRefresh").onclick = refreshExchange;
+
+setInterval(pollStatus, 1500);
+setInterval(pollLogs, 1000);
+setInterval(refreshExchange, 15000);
+pollStatus();
+setTimeout(refreshExchange, 1200);
+</script>
+</body>
+</html>
