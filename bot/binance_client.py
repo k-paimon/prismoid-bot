@@ -28,6 +28,7 @@ WEIGHTS = {
     ("GET", "/api/v3/time"): 1,
     ("GET", "/api/v3/exchangeInfo"): 20,
     ("GET", "/api/v3/ticker/bookTicker"): 2,
+    ("GET", "/api/v3/ticker/price"): 4,       # all symbols
     ("GET", "/api/v3/klines"): 2,
     ("GET", "/api/v3/account"): 20,
     ("GET", "/api/v3/openOrders"): 6,     # with symbol
@@ -217,6 +218,10 @@ class BinanceClient:
 
     def book_ticker(self, symbol):
         return self._request("GET", "/api/v3/ticker/bookTicker", {"symbol": symbol})
+
+    def all_prices(self):
+        """Last price for every symbol — used to value balances in USD."""
+        return self._request("GET", "/api/v3/ticker/price")
 
     def klines(self, symbol, interval, limit=100):
         return self._request("GET", "/api/v3/klines",

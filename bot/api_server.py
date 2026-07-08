@@ -35,6 +35,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from binance_client import BinanceClient  # noqa: E402
 
 BOT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.py")
+DAILY_FILE = os.path.join(os.path.expanduser("~"), ".gridbot-daily.json")
+STABLECOINS = {"USDT", "USDC", "FDUSD", "TUSD", "BUSD", "DAI"}
 
 
 def bot_cmd_prefix():
@@ -139,6 +141,19 @@ class BotManager:
              "side": o["side"], "price": o["price"], "qty": o["origQty"],
              "time": o["time"]}
             for o in oo["body"]] if oo["status"] == 200 else [])
+        # total account value in USD + change since the first reading today
+        prices_resp = client.all_prices()
+        if prices_resp["status"] == 200:
+            prices = {p["symbol"]: float(p["price"]) for p in prices_resp["body"]}
+            total_usd = 0.0
+            for b in out["balances"]:
+                amount = float(b.get("free", 0)) + float(b.get("locked", 0))
+                if b["asset"] in STABLECOINS:
+                    total_usd += amount
+                elif prices.get(b["asset"] + "USDT"):
+                    total_usd += amount * prices[b["asset"] + "USDT"]
+            out["total_usd"] = round(total_usd, 2)
+            out["daily_pnl"] = self._daily_pnl(total_usd)
         tr = client.my_trades(symbol, limit=15)
         out["trades"] = ([
             {"tradeId": t["id"], "orderId": t["orderId"],
@@ -148,6 +163,26 @@ class BotManager:
             for t in sorted(tr["body"], key=lambda t: -t["time"])]
             if tr["status"] == 200 else [])
         return out
+
+    @staticmethod
+    def _daily_pnl(equity):
+        """Equity change since the first reading of the local calendar day.
+        The baseline persists in DAILY_FILE so it survives restarts."""
+        today = time.strftime("%Y-%m-%d")
+        state = {}
+        try:
+            with open(DAILY_FILE) as fh:
+                state = json.load(fh)
+        except (OSError, ValueError):
+            pass
+        if state.get("date") != today:
+            state = {"date": today, "baseline": equity}
+            try:
+                with open(DAILY_FILE, "w") as fh:
+                    json.dump(state, fh)
+            except OSError:
+                pass
+        return round(equity - state.get("baseline", equity), 2)
 
     def credentials_info(self):
         with self.lock:

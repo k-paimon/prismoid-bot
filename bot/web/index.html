@@ -31,10 +31,13 @@
     padding: 0 20px 16px; max-width: 1200px; margin: 0 auto;
   }
   #statsbar {
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px;
     max-width: 1200px; margin: 0 auto; padding: 16px 20px 12px;
   }
-  @media (max-width: 800px) { #statsbar { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 980px) { #statsbar { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 560px) { #statsbar { grid-template-columns: repeat(2, 1fr); } }
+  .pos { color: var(--accent); }
+  .neg { color: var(--danger); }
   .tile {
     background: var(--card); border: 1px solid var(--line); border-radius: 8px;
     padding: 10px 14px; box-shadow: 0 1px 3px rgba(20,40,60,.06);
@@ -42,8 +45,6 @@
   .tlabel { font-size: 12px; color: var(--muted); }
   .tvalue { font-size: 20px; font-weight: 600; margin: 2px 0; }
   .tvalue.big { font-size: 26px; }
-  .tvalue.pos { color: var(--accent); }
-  .tvalue.neg { color: var(--danger); }
   .tsub { font-size: 11px; color: var(--muted); }
   @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
   .card {
@@ -131,8 +132,13 @@
 </header>
 
 <div id="statsbar">
+  <div class="tile" title="Everything in your demo account valued in USD at current prices (stablecoins at face value). 'Today' is the change since the first reading of the day — fills and price moves on holdings both count">
+    <div class="tlabel">Total assets (USD)</div>
+    <div class="tvalue big" id="tAssets">&mdash;</div>
+    <div class="tsub" id="tAssetsSub">save credentials to load</div>
+  </div>
   <div class="tile" id="tileTotal">
-    <div class="tlabel">Total PnL</div>
+    <div class="tlabel">Session PnL</div>
     <div class="tvalue big" id="tTotal">&mdash;</div>
     <div class="tsub" id="tTotalSub">start the bot to track</div>
   </div>
@@ -474,6 +480,14 @@ async function refreshExchange() {
     const sym = $("symbol").value.trim().toUpperCase() || "BTCUSDT";
     const d = await api(`/api/exchange?symbol=${encodeURIComponent(sym)}`);
     if (d.error) { $("exBalances").textContent = d.error; return; }
+    if (d.total_usd !== undefined) {
+      $("tAssets").textContent = "$" + d.total_usd.toLocaleString(undefined,
+        {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      const dp = d.daily_pnl || 0;
+      const cls = dp > 0.005 ? "pos" : dp < -0.005 ? "neg" : "";
+      $("tAssetsSub").innerHTML =
+        `today <span class="${cls}">${(dp >= 0 ? "+" : "") + dp.toFixed(2)} USD</span>`;
+    }
     $("exBalances").textContent = "Balances: " + (d.balances || [])
       .map(b => `${b.asset} ${(+b.free).toFixed(5)}${+b.locked ? ` (+${(+b.locked).toFixed(5)} in orders)` : ""}`)
       .join("  |  ");
