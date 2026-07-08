@@ -135,6 +135,7 @@ class BotManager:
         self.api_key = None
         self.api_secret = None
         self.bot_stats = None       # last @STATS payload from the bot
+        self.backtest_result = None  # last @BACKTEST payload (comparison table)
 
     # ---------------------------------------------------------------- logging
 
@@ -243,6 +244,7 @@ class BotManager:
                 "log_count": self.total_lines,
                 "credentials_set": bool(self.api_key and self.api_secret),
                 "stats": self.bot_stats,
+                "backtest": self.backtest_result,
             }
 
     def start(self, params, check=False, backtest=False):
@@ -377,6 +379,13 @@ class BotManager:
                 except ValueError:
                     pass
                 continue        # machine channel — keep it out of the console
+            if line.startswith("@BACKTEST "):
+                try:
+                    with self.lock:
+                        self.backtest_result = json.loads(line[10:])
+                except ValueError:
+                    pass
+                continue
             self.log(line)
         proc.wait()
         self.log(f"[api] bot exited with code {proc.returncode}")

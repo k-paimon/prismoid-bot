@@ -151,7 +151,10 @@ harsher).
 buy "fills" if a later candle's low touches it, at the order's own price.
 That ignores order-book queues and depth, so results are **directional, not
 exact**; a strategy that loses in backtest will very likely lose live, but a
-small backtest profit is not a guarantee. The repo also keeps hummingbot's
+small backtest profit is not a guarantee. This bias is mild for directional
+strategies and **enormous for market making**: pmm_simple can appear to
+harvest the full spread every candle, which no real maker achieves — treat
+maker backtest PnL strictly as an upper bound. The repo also keeps hummingbot's
 own engine-based backtests in `poc/backtest_strategies.py` (runs the actual
 hummingbot controllers inside the Docker image) if you want a second opinion
 from the framework itself.

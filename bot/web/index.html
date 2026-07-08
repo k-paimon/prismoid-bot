@@ -284,9 +284,10 @@
     <button id="stopBtn" class="danger" disabled title="Cancels all the bot's open orders, then prints the PnL and request reports">Stop</button>
     <div style="margin-top:10px">
       <button id="backtestBtn" style="margin-top:0" title="Replays real historical candles through the picked strategy with these exact parameters — simulated fills and fees, no orders placed, no keys needed. Results appear in the console">Backtest</button>
+      <button id="compareBtn" style="margin-top:0" title="Backtests ALL FOUR strategies simultaneously over the same candles, each with its current parameters from this page, and renders a PnL comparison table">Compare all</button>
       <label title="How many days of price history to replay" style="display:inline-flex;align-items:center;gap:5px;margin-top:0">
         <span class="tt">last</span>
-        <input type="text" id="bt_days" value="7" style="width:44px;margin:0"> days
+        <input type="text" id="bt_days" value="30" style="width:44px;margin:0"> days
       </label>
     </div>
     <div class="hint">Backtest answers "would these parameters have made money?" before you run them live.</div>
@@ -294,6 +295,20 @@
 </div>
 
 <div>
+  <div class="card" id="cmpCard" style="display:none">
+    <h2>Strategy comparison <span class="hint" id="cmpMeta" style="display:inline;font-weight:400;text-transform:none;letter-spacing:0"></span></h2>
+    <table class="mini" id="cmpTable">
+      <thead><tr><th>strategy</th><th>trades</th><th>realized</th><th>unrealized</th>
+        <th>fees</th><th>total</th><th>% of budget</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="hint" style="margin-top:6px">Each strategy ran independently over the
+      same candles with its parameters from this page (cj at 1x, long-only in
+      backtests). Directional, not exact &mdash; and <b>maker-strategy results
+      (pmm, grid) are upper bounds</b>: candle-based fills ignore queue position
+      and one-sided flow, which inflates market-making PnL enormously. Compare
+      strategies against each other with skepticism, not as forecasts.</div>
+  </div>
   <div class="card">
     <h2>Console</h2>
     <div id="console">waiting for the bot API...</div>
@@ -423,6 +438,11 @@ async function pollStatus() {
     $("credsState").textContent = s.credentials_set
       ? "credentials saved (in memory)" : "no credentials saved";
     updateStatsTiles(s.stats);
+    const cmpJson = JSON.stringify(s.backtest || null);
+    if (cmpJson !== lastCmpJson) {
+      lastCmpJson = cmpJson;
+      renderComparison(s.backtest);
+    }
   } catch (e) { apiUp = false; botRunning = false; }
   setBadges();
 }
@@ -510,7 +530,7 @@ $("stopBtn").onclick = () => withLoading($("stopBtn"), async () => {
 $("backtestBtn").onclick = () => withLoading($("backtestBtn"), async () => {
   persist();
   const p = gatherParams();
-  p.days = $("bt_days").value.trim() || "7";
+  p.days = $("bt_days").value.trim() || "30";
   delete p.trade;
   const r = await post("/api/backtest", p);
   if (r.ok) {                       // spinner for the whole replay
@@ -518,6 +538,46 @@ $("backtestBtn").onclick = () => withLoading($("backtestBtn"), async () => {
     await waitUntil(() => !botRunning, 300000);
   }
 });
+$("compareBtn").onclick = () => withLoading($("compareBtn"), async () => {
+  persist();
+  // every strategy with its current parameters, all in one simulation
+  const p = { strategies: ["grid", "pmm", "supertrend", "cj"],
+              days: $("bt_days").value.trim() || "30" };
+  const ids = ["symbol", "total_quote",
+               ...[].concat(...Object.values(STRATEGY_PARAM_IDS))];
+  for (const id of ids) {
+    const el = $(id);
+    if (el && el.value.trim()) p[id] = el.value.trim();
+  }
+  delete p.cj_leverage; delete p.cj_direction;   // futures-only, not backtestable
+  const r = await post("/api/backtest", p);
+  if (r.ok) {
+    await waitUntil(() => botRunning, 5000);
+    await waitUntil(() => !botRunning, 600000);
+  }
+});
+
+let lastCmpJson = "";
+function renderComparison(d) {
+  if (!d) return;
+  $("cmpCard").style.display = "";
+  $("cmpMeta").textContent =
+    ` — ${d.symbol}, ${d.days} days of ${d.candles} candles, ` +
+    `fee ${d.fee_pct.toFixed(2)}%/fill, market ${d.span_pct >= 0 ? "+" : ""}${d.span_pct.toFixed(2)}%`;
+  const money = v => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+  const cls = v => v > 0.005 ? "pos" : v < -0.005 ? "neg" : "";
+  const body = d.strategies.map(s =>
+    `<tr><td>${s.name}</td><td>${s.buys}b/${s.sells}s</td>` +
+    `<td>${money(s.realized)}</td><td>${money(s.unrealized)}</td>` +
+    `<td>${s.fees.toFixed(2)}</td>` +
+    `<td class="${cls(s.total)}">${money(s.total)}</td>` +
+    `<td class="${cls(s.total)}">${money(s.pct)}%</td></tr>`).join("");
+  const bh = d.buyhold;
+  $("cmpTable").tBodies[0].innerHTML = body +
+    `<tr><td>buy &amp; hold</td><td>1b/0s</td><td>—</td><td>${money(bh)}</td>` +
+    `<td>—</td><td class="${cls(bh)}">${money(bh)}</td>` +
+    `<td class="${cls(bh)}">${money(d.span_pct)}%</td></tr>`;
+}
 $("trade").onchange = async () => {
   const s = apiUp ? await api("/api/status") : {credentials_set: false};
   $("tradeWarn").style.display =

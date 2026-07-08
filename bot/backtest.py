@@ -17,6 +17,7 @@ Fees default to 0.10% per fill (--fee), Binance spot's standard rate —
 deliberately harsher than the demo account's 0%.
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -210,6 +211,29 @@ def main():
           f"{runner.fills} fills over {len(candles)} candles")
     print("note: OHLC fill simulation is optimistic about queue position and "
           "ignores order-book depth — treat results as directional, not exact.")
+
+    # machine-readable summary for the dashboard's comparison table
+    rows = []
+    for prefix in strategies:
+        t = runner.pnl_by.get(prefix)
+        name = STRATEGY_NAMES.get(prefix, prefix)
+        if t is None:
+            rows.append({"name": name, "buys": 0, "sells": 0, "realized": 0.0,
+                         "unrealized": 0.0, "fees": 0.0, "total": 0.0, "pct": 0.0})
+            continue
+        unreal = t.unrealized(last_close)
+        total = t.realized + unreal - t.fees
+        rows.append({"name": name, "buys": t.buys, "sells": t.sells,
+                     "realized": float(t.realized), "unrealized": float(unreal),
+                     "fees": float(t.fees), "total": float(total),
+                     "pct": float(total / args.total_quote * 100)})
+    print("@BACKTEST " + json.dumps({
+        "symbol": args.symbol, "days": args.days, "candles": args.candles,
+        "fee_pct": float(fee_rate * 100), "span_pct": float(span_pct),
+        "budget": float(args.total_quote),
+        "buyhold": float(args.total_quote * span_pct / 100),
+        "strategies": rows,
+    }), flush=True)
 
 
 if __name__ == "__main__":
