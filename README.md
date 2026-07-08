@@ -43,7 +43,8 @@ bare-features/
 │   ├── web/index.html           # browser dashboard
 │   └── build_windows.ps1 / build_macos.sh   # package as .exe / .dmg (PyInstaller)
 └── docs/
-    └── trading-bot.md       # bot design: strategies, rate limits, request budget
+    ├── trading-bot.md       # bot design: strategies, rate limits, request budget
+    └── strategy-guide.md    # how to use the algorithms: parameters, tuning, FAQ
 ```
 
 ## How the pieces hook into the real app
