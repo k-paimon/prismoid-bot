@@ -38,6 +38,8 @@
   .card h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase;
              letter-spacing: .04em; color: var(--muted); }
   label { display: block; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  label[title], .checks label[title] { cursor: help; }
+  .tt { border-bottom: 1px dotted #9aa8b5; }
   input[type=text], input[type=password], select {
     width: 100%; padding: 6px 8px; margin-top: 2px;
     border: 1px solid var(--line); border-radius: 5px; font: inherit;
@@ -111,8 +113,8 @@
 <div>
   <div class="card">
     <h2>Demo account credentials</h2>
-    <label>API key <input type="text" id="apiKey" autocomplete="off"></label>
-    <label>API secret <input type="password" id="apiSecret" autocomplete="off"></label>
+    <label title="The public half of your demo API key pair — identifies your demo account to Binance"><span class="tt">API key</span> <input type="text" id="apiKey" autocomplete="off"></label>
+    <label title="The private half — used to sign requests. Shown only once by Binance when you create the key"><span class="tt">API secret</span> <input type="password" id="apiSecret" autocomplete="off"></label>
     <button id="saveCreds">Save credentials</button>
     <button id="clearCreds">Clear</button>
     <div class="hint" id="credsState">no credentials saved</div>
@@ -124,39 +126,39 @@
 
   <div class="card">
     <h2>Parameters</h2>
-    <label>Trading pair <input type="text" id="symbol" value="BTCUSDT"></label>
+    <label title="The market to trade. BTCUSDT means: buy and sell BTC, priced and budgeted in USDT"><span class="tt">Trading pair</span> <input type="text" id="symbol" value="BTCUSDT"></label>
     <div class="row2">
-      <label>Grid start price <input type="text" id="grid_start" placeholder="-3% or price"></label>
-      <label>Grid end price <input type="text" id="grid_end" placeholder="+3% or price"></label>
+      <label title="Bottom of the grid — the lowest price a buy order can rest at. Absolute price (e.g. 59000) or an offset from the current price (e.g. -3%)"><span class="tt">Grid start price</span> <input type="text" id="grid_start" placeholder="-3% or price"></label>
+      <label title="Top of the grid. Buy levels are spaced evenly between start and end; each fill is resold one level higher"><span class="tt">Grid end price</span> <input type="text" id="grid_end" placeholder="+3% or price"></label>
     </div>
     <div class="row2">
-      <label>Limit (stop) price <input type="text" id="grid_limit" placeholder="-5% or price"></label>
-      <label>Grid levels <input type="text" id="grid_levels" value="8"></label>
+      <label title="Safety cut-off below the grid: if price falls under this, the bot pulls its orders and stops buying instead of catching a falling market"><span class="tt">Limit (stop) price</span> <input type="text" id="grid_limit" placeholder="-5% or price"></label>
+      <label title="How many price levels the grid is split into. More levels = smaller spacing = smaller but more frequent profits per round trip"><span class="tt">Grid levels</span> <input type="text" id="grid_levels" value="8"></label>
     </div>
     <div class="row2">
-      <label>Max open orders <input type="text" id="grid_max_open" value="3"></label>
-      <label>Total amount (quote) <input type="text" id="total_quote" value="200"></label>
+      <label title="How many buy orders rest on the book at once — the levels nearest below the current price. Others wait their turn"><span class="tt">Max open orders</span> <input type="text" id="grid_max_open" value="3"></label>
+      <label title="Total USDT budget for the strategy, split evenly across the grid levels. With 200 USDT and 8 levels, each order is ~25 USDT"><span class="tt">Total amount (quote)</span> <input type="text" id="total_quote" value="200"></label>
     </div>
     <div class="row2">
-      <label>Tick interval (s) <input type="text" id="interval" value="10"></label>
-      <label>Duration (s) <input type="text" id="duration" placeholder="until stopped"></label>
+      <label title="How often (in seconds) the bot re-reads the market and adjusts its orders. Lower = more responsive but more API requests"><span class="tt">Tick interval (s)</span> <input type="text" id="interval" value="10"></label>
+      <label title="Auto-stop after this many seconds and print the reports. Leave blank to run until you press Stop"><span class="tt">Duration (s)</span> <input type="text" id="duration" placeholder="until stopped"></label>
     </div>
     <div class="checks">
-      <label><input type="checkbox" id="st_grid" checked> grid strike</label>
-      <label><input type="checkbox" id="st_pmm"> pmm simple</label>
-      <label><input type="checkbox" id="st_supertrend"> supertrend</label>
+      <label title="Rests a ladder of buy orders below the price; every fill is resold one grid level higher, pocketing the step"><input type="checkbox" id="st_grid" checked> <span class="tt">grid strike</span></label>
+      <label title="Market making: continuously quotes a buy and a sell around the mid price and refreshes them as the price moves"><input type="checkbox" id="st_pmm"> <span class="tt">pmm simple</span></label>
+      <label title="Trend following: buys when the Supertrend indicator turns bullish near the trend line, sells the position when it flips bearish"><input type="checkbox" id="st_supertrend"> <span class="tt">supertrend</span></label>
     </div>
     <div class="checks">
-      <label><input type="checkbox" id="trade"> place real orders on your demo account (off = dry-run)</label>
+      <label title="Off: the bot only prints what it would do (safe rehearsal). On: orders are actually placed on your Binance demo account"><input type="checkbox" id="trade"> <span class="tt">place real orders on your demo account (off = dry-run)</span></label>
     </div>
     <div class="warn" id="tradeWarn">Real orders need saved credentials.</div>
   </div>
 
   <div class="card">
     <h2>Control</h2>
-    <button id="checkBtn">Test connection</button>
-    <button id="startBtn" class="primary">Start bot</button>
-    <button id="stopBtn" class="danger" disabled>Stop</button>
+    <button id="checkBtn" title="Pings Binance, verifies your keys, has the exchange validate a test order, and reports the request cost — nothing is traded">Test connection</button>
+    <button id="startBtn" class="primary" title="Starts the ticked strategies with the parameters above">Start bot</button>
+    <button id="stopBtn" class="danger" disabled title="Cancels all the bot's open orders, then prints the PnL and request reports">Stop</button>
     <div class="hint">Stop cancels the bot's open orders and prints the request report.</div>
   </div>
 </div>

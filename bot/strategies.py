@@ -256,6 +256,7 @@ class Supertrend:
             self.exits += 1
 
     def summary(self):
+        shown = self.position_qty.quantize(Decimal("0.00000001")).normalize()
         return (f"supertrend_v1: {self.entries} entries, {self.exits} exits, "
-                f"open position {self.position_qty.normalize():f} base; "
+                f"open position {shown:f} base; "
                 f"last signal: {self.last_signal}")

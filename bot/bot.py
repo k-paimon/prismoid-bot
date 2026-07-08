@@ -103,23 +103,20 @@ class PnLTracker:
     def unrealized(self, mid):
         return (mid - self.avg_cost) * self.position if mid else Decimal("0")
 
-    def brief(self, mid):
-        total = self.realized + self.unrealized(mid) - self.fees
-        return (f"PnL {total:+.2f} (R{self.realized:+.2f} "
-                f"U{self.unrealized(mid):+.2f})")
-
-    def summary(self, mid, base="base", quote="quote"):
-        if not (self.buys or self.sells):
-            return "PnL: no fills this session"
+    def summary_line(self, mid, base="base"):
         unreal = self.unrealized(mid)
         total = self.realized + unreal - self.fees
-        lines = [f"PnL ({quote}): total {total:+.2f} = realized {self.realized:+.2f} "
-                 f"+ unrealized {unreal:+.2f} - fees {self.fees:.2f}",
-                 f"  {self.buys} buy fills ({self.buy_volume:.2f} {quote}), "
-                 f"{self.sells} sell fills ({self.sell_volume:.2f} {quote}); "
-                 f"inventory {self.position.normalize():f} {base}"
-                 + (f" @ avg cost {self.avg_cost:.2f}" if self.position else "")]
-        return "\n".join(lines)
+        line = (f"total {total:+.2f}  (realized {self.realized:+.2f}, "
+                f"unrealized {unreal:+.2f}, fees {self.fees:.2f})  |  "
+                f"{self.buys} buys {self.buy_volume:.2f}, "
+                f"{self.sells} sells {self.sell_volume:.2f}")
+        if self.position:
+            shown = self.position.quantize(Decimal("0.00000001")).normalize()
+            line += f", holding {shown:f} {base} bought @ avg {self.avg_cost:.2f}"
+        return line
+
+
+STRATEGY_NAMES = {"GS": "grid_strike", "PMM": "pmm_simple", "ST": "supertrend_v1"}
 
 
 def weight_limit_from(rate_limits):
@@ -199,13 +196,27 @@ class BotRunner:
         self.last_candles_fetch = 0
         self.dry_run = not client.can_sign
         self.placements = self.cancels = self.rejections = 0
-        self.pnl = PnLTracker()
+        self.pnl_by = {}                # strategy prefix -> PnLTracker
         self.last_mid = None
 
     # -------------------------------------------------------------- utilities
 
     def strategy_for(self, tag):
         return self.strategies.get(tag.split("-")[0])
+
+    def name_of(self, tag):
+        return STRATEGY_NAMES.get(tag.split("-")[0], tag)
+
+    def pnl_for(self, tag):
+        return self.pnl_by.setdefault(tag.split("-")[0], PnLTracker())
+
+    def pnl_brief(self, mid):
+        realized = sum((t.realized for t in self.pnl_by.values()), Decimal("0"))
+        unreal = sum((t.unrealized(mid) for t in self.pnl_by.values()), Decimal("0"))
+        fees = sum((t.fees for t in self.pnl_by.values()), Decimal("0"))
+        quote = self.filters.get("quote_asset", "") if self.filters else ""
+        return (f"PnL {realized + unreal - fees:+.2f} {quote} "
+                f"(realized {realized:+.2f} / unrealized {unreal:+.2f})")
 
     def next_id(self, tag):
         # separator must satisfy Binance's clientOrderId charset [a-zA-Z0-9-_];
@@ -272,11 +283,13 @@ class BotRunner:
                 info["status"] = status
                 if status == "FILLED":
                     body = r["body"]
-                    print(f"    FILL {info['tag']} ({body.get('executedQty')} @ "
-                          f"{body.get('price')}, binance orderId {body.get('orderId')})")
-                    self.pnl.on_fill(body.get("side"),
-                                     Decimal(body.get("executedQty", "0")),
-                                     Decimal(body.get("cummulativeQuoteQty", "0")))
+                    print(f"    FILL [{self.name_of(info['tag'])}] {info['tag']} "
+                          f"({body.get('executedQty')} @ {body.get('price')}, "
+                          f"binance orderId {body.get('orderId')})")
+                    self.pnl_for(info["tag"]).on_fill(
+                        body.get("side"),
+                        Decimal(body.get("executedQty", "0")),
+                        Decimal(body.get("cummulativeQuoteQty", "0")))
                     self.strategy_for(info["tag"]).on_fill(info["tag"], body)
         return open_by_tag
 
@@ -287,11 +300,12 @@ class BotRunner:
         cid = self.next_id(order["tag"])
         params["newClientOrderId"] = cid
         if self.dry_run:
-            print(f"    [dry-run] PLACE {params}")
+            print(f"    [dry-run] PLACE [{self.name_of(order['tag'])}] {params}")
             self.placements += 1
             if order["type"] == "MARKET":       # simulate immediate fill at mid
                 qty = order.get("qty") or (order["quote_qty"] / mid)
-                self.pnl.on_fill(order["side"], Decimal(qty), Decimal(qty) * mid)
+                self.pnl_for(order["tag"]).on_fill(order["side"], Decimal(qty),
+                                                   Decimal(qty) * mid)
                 self.strategy_for(order["tag"]).on_fill(
                     order["tag"], {"executedQty": f"{qty:f}", "price": f"{mid:f}"})
             else:
@@ -308,22 +322,25 @@ class BotRunner:
                            for f in body.get("fills", [])
                            if f.get("commissionAsset") == self.filters["quote_asset"]),
                           Decimal("0"))
-                print(f"    FILL {order['tag']} (market, {body.get('executedQty')}, "
+                print(f"    FILL [{self.name_of(order['tag'])}] {order['tag']} "
+                      f"(market, {body.get('executedQty')}, "
                       f"binance orderId {body.get('orderId')})")
-                self.pnl.on_fill(body.get("side"),
-                                 Decimal(body.get("executedQty", "0")),
-                                 Decimal(body.get("cummulativeQuoteQty", "0")), fee)
+                self.pnl_for(order["tag"]).on_fill(
+                    body.get("side"), Decimal(body.get("executedQty", "0")),
+                    Decimal(body.get("cummulativeQuoteQty", "0")), fee)
                 self.strategy_for(order["tag"]).on_fill(order["tag"], body)
             else:
                 self.tracked[cid] = {"tag": order["tag"], "status": "resting",
                                      "placed_at": time.time()}
-                print(f"    PLACED {order['tag']} {params['side']} "
+                print(f"    PLACED [{self.name_of(order['tag'])}] {order['tag']} "
+                      f"{params['side']} "
                       f"{params.get('quantity', params.get('quoteOrderQty'))} "
                       f"@ {params.get('price', 'MKT')} "
                       f"(binance orderId {body.get('orderId')})")
         else:
             self.rejections += 1
-            print(f"    REJECTED {order['tag']}: {r['body'].get('msg', r['body'])}")
+            print(f"    REJECTED [{self.name_of(order['tag'])}] {order['tag']}: "
+                  f"{r['body'].get('msg', r['body'])}")
 
     def cancel(self, open_info):
         cid = open_info["clientOrderId"]
@@ -402,7 +419,7 @@ class BotRunner:
         print(f"[{time.strftime('%H:%M:%S')}] mid={mid.normalize():f} "
               f"open={len(open_by_tag)} placed={self.placements} "
               f"canceled={self.cancels} rejected={self.rejections} | "
-              f"{self.pnl.brief(mid)} | "
+              f"{self.pnl_brief(mid)} | "
               f"weight-1m={meter.used_weight_1m} reqs={meter.total_requests}"
               + (f" | ST {st.last_signal}" if st and st.last_signal != 'none' else ""))
 
@@ -455,9 +472,27 @@ class BotRunner:
         print()
         for strat in self.strategies.values():
             print(strat.summary())
-        print(self.pnl.summary(self.last_mid,
-                               base=self.filters.get("base_asset", "base"),
-                               quote=self.filters.get("quote_asset", "quote")))
+        print()
+        base = self.filters.get("base_asset", "base") if self.filters else "base"
+        quote = self.filters.get("quote_asset", "quote") if self.filters else "quote"
+        if not self.pnl_by:
+            print("PnL: no fills this session — nothing was bought or sold, "
+                  "so no money was made or lost")
+        else:
+            print(f"PnL by strategy, in {quote} "
+                  f"(realized = locked in by completed sells; "
+                  f"unrealized = value change of {base} still held):")
+            for prefix, tracker in self.pnl_by.items():
+                name = STRATEGY_NAMES.get(prefix, prefix)
+                print(f"  {name:<14} {tracker.summary_line(self.last_mid, base)}")
+            if len(self.pnl_by) > 1:
+                realized = sum((t.realized for t in self.pnl_by.values()), Decimal("0"))
+                unreal = sum((t.unrealized(self.last_mid)
+                              for t in self.pnl_by.values()), Decimal("0"))
+                fees = sum((t.fees for t in self.pnl_by.values()), Decimal("0"))
+                print(f"  {'TOTAL':<14} {realized + unreal - fees:+.2f} {quote}  "
+                      f"(realized {realized:+.2f}, unrealized {unreal:+.2f}, "
+                      f"fees {fees:.2f})")
         print(f"session actions: {self.placements} placed, {self.cancels} canceled, "
               f"{self.rejections} rejected")
         print()
