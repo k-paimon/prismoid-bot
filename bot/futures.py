@@ -45,6 +45,8 @@ WEIGHTS.update({
     ("POST", "/fapi/v1/order"): 1,
     ("GET", "/fapi/v1/openOrders"): 1,
     ("DELETE", "/fapi/v1/allOpenOrders"): 1,
+    ("POST", "/fapi/v1/algoOrder"): 1,
+    ("DELETE", "/fapi/v1/algoOrder"): 1,
 })
 
 
@@ -93,6 +95,15 @@ class FuturesClient(BinanceClient):
     def cancel_all(self, symbol):
         return self._request("DELETE", "/fapi/v1/allOpenOrders",
                              {"symbol": symbol}, signed=True)
+
+    # conditional (TP/SL) orders live on the Algo Order service since 2025-12
+    def place_algo_order(self, **params):
+        params.setdefault("algoType", "CONDITIONAL")
+        return self._request("POST", "/fapi/v1/algoOrder", params, signed=True)
+
+    def cancel_algo_order(self, algo_id):
+        return self._request("DELETE", "/fapi/v1/algoOrder",
+                             {"algoId": algo_id}, signed=True)
 
 
 def get_futures_filters(client, symbol):
@@ -148,6 +159,7 @@ class CompoundFuturesTrader:
         self.wins = self.losses = 0
         self.seq = 0
         self.last_unrealized = Decimal("0")
+        self.algo_ids = []      # exchange-side TP/SL orders of the open trade
 
     # price move needed on the CONTRACT for a capital-relative target
     def price_from_roe(self, roe, direction):
@@ -198,20 +210,23 @@ class CompoundFuturesTrader:
               f"TP {self.tp_price} SL {self.sl_price or 'none'} "
               f"liq ~{self.entry_price * (1 - 1 / Decimal(self.leverage)):.0f}")
         if not self.dry_run:
-            tp = self.client.place_order(symbol=self.symbol, side="SELL",
-                                         type="TAKE_PROFIT_MARKET",
-                                         stopPrice=f"{self.tp_price.normalize():f}",
-                                         closePosition="true",
-                                         newClientOrderId=f"CJF-TP_{self.seq}")
-            if tp["status"] != 200:
+            self.algo_ids = []
+            tp = self.client.place_algo_order(
+                symbol=self.symbol, side="SELL", type="TAKE_PROFIT_MARKET",
+                triggerPrice=f"{self.tp_price.normalize():f}",
+                closePosition="true", clientAlgoId=f"CJF-TP_{self.seq}")
+            if tp["status"] == 200:
+                self.algo_ids.append(tp["body"].get("algoId"))
+            else:
                 print(f"    TP order REJECTED: {tp['body'].get('msg', tp['body'])}")
             if self.sl_price is not None:
-                sl = self.client.place_order(symbol=self.symbol, side="SELL",
-                                             type="STOP_MARKET",
-                                             stopPrice=f"{self.sl_price.normalize():f}",
-                                             closePosition="true",
-                                             newClientOrderId=f"CJF-SL_{self.seq}")
-                if sl["status"] != 200:
+                sl = self.client.place_algo_order(
+                    symbol=self.symbol, side="SELL", type="STOP_MARKET",
+                    triggerPrice=f"{self.sl_price.normalize():f}",
+                    closePosition="true", clientAlgoId=f"CJF-SL_{self.seq}")
+                if sl["status"] == 200:
+                    self.algo_ids.append(sl["body"].get("algoId"))
+                else:
                     print(f"    SL order REJECTED: {sl['body'].get('msg', sl['body'])}")
 
     # ------------------------------------------------------------------- exit
@@ -224,7 +239,7 @@ class CompoundFuturesTrader:
             pnl = (wallet_now - self.wallet_before
                    if wallet_now is not None and self.wallet_before is not None
                    else Decimal("0"))
-            self.client.cancel_all(self.symbol)      # drop the surviving TP or SL
+            self.cancel_algos()                      # drop the surviving TP or SL
         self.capital += pnl
         if pnl > 0:
             self.wins += 1
@@ -238,6 +253,12 @@ class CompoundFuturesTrader:
         self.last_unrealized = Decimal("0")
         if self.capital <= 0:
             sys.exit("capital wiped out — stopping")
+
+    def cancel_algos(self):
+        for algo_id in self.algo_ids:
+            if algo_id is not None:
+                self.client.cancel_algo_order(algo_id)   # already-fired ids just 4xx
+        self.algo_ids = []
 
     # ------------------------------------------------------------------- tick
 
@@ -294,7 +315,22 @@ class CompoundFuturesTrader:
         print(f"{mode} | {self.symbol} x{self.leverage} | target +{self.target * 100:.1f}% "
               f"on capital = {move:.2f}% price move | stop "
               f"{f'{self.stop * 100:.1f}%' if self.stop is not None else 'NONE'} | "
-              f"capital {self.capital:.2f} USDT, always all-in\n")
+              f"capital {self.capital:.2f} USDT, always all-in")
+        # entry (taker) + TP/SL trigger (taker) fees are charged on the NOTIONAL,
+        # so as a share of capital they scale with leverage
+        taker = Decimal("0.0005")
+        fee_of_capital = 2 * taker * self.leverage * 100
+        print(f"round-trip taker fees ~{fee_of_capital:.2f}% of capital per trade "
+              f"vs the +{self.target * 100:.1f}% target"
+              + ("  << WARNING: fees ALONE exceed the target — every 'win' loses; "
+                 "lower the leverage or raise the target"
+                 if fee_of_capital >= self.target * 100 else ""))
+        if self.stop is None:
+            print(f"WARNING: no stop at x{self.leverage} — liquidation sits only "
+                  f"~{100 / self.leverage:.1f}% below entry; one dip that size "
+                  f"ends the account\n")
+        else:
+            print()
         if not self.dry_run:
             r = self.client.set_leverage(self.symbol, self.leverage)
             if r["status"] != 200:
@@ -326,6 +362,7 @@ class CompoundFuturesTrader:
             self.client.place_order(symbol=self.symbol, side="SELL", type="MARKET",
                                     quantity=f"{self.position_qty.normalize():f}",
                                     reduceOnly="true", newOrderRespType="RESULT")
+            self.cancel_algos()
             self.client.cancel_all(self.symbol)
             wallet_now = usdt_wallet(self.client)
             if wallet_now is not None and self.wallet_before is not None:
