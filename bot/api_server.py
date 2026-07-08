@@ -274,6 +274,10 @@ class BotManager:
                     if entry not in ("always", "trend", "fvg", "trend+fvg"):
                         return False, f"bad entry mode: {entry!r}"
                     cmd += ["--entry", entry]
+                    direction = str(params.get("cj_direction") or "long").strip().lower()
+                    if direction not in ("long", "short", "auto"):
+                        return False, f"bad direction: {direction!r}"
+                    cmd += ["--direction", direction]
                 except (TypeError, ValueError, KeyError) as e:
                     return False, f"bad futures parameter: {e}"
                 if params.get("trade"):

@@ -153,6 +153,7 @@ class CompoundFuturesTrader:
         self.filter_reason = ""
         # per-trade state
         self.position_qty = Decimal("0")
+        self.position_side = "BUY"      # BUY = long, SELL = short
         self.entry_price = None
         self.tp_price = self.sl_price = None
         self.wallet_before = None
@@ -161,9 +162,11 @@ class CompoundFuturesTrader:
         self.last_unrealized = Decimal("0")
         self.algo_ids = []      # exchange-side TP/SL orders of the open trade
 
-    # price move needed on the CONTRACT for a capital-relative target
+    # price move needed on the CONTRACT for a capital-relative target;
+    # direction +1 = profit side, -1 = loss side (relative to the position)
     def price_from_roe(self, roe, direction):
-        return self.entry_price * (1 + direction * roe / self.leverage)
+        sign = direction if self.position_side == "BUY" else -direction
+        return self.entry_price * (1 + sign * roe / self.leverage)
 
     def emit_stats(self, mid):
         realized = self.capital - self.start_capital
@@ -179,18 +182,20 @@ class CompoundFuturesTrader:
 
     # ------------------------------------------------------------------ entry
 
-    def enter(self, mid):
+    def enter(self, mid, side="BUY"):
         qty = round_to(self.capital * self.leverage / mid, self.filters["step_size"])
         if qty * mid < self.filters["min_notional"]:
             sys.exit(f"position {qty * mid:.2f} USDT is under the futures minimum "
                      f"({self.filters['min_notional']}) — raise --capital or --leverage")
         self.seq += 1
+        self.position_side = side
+        exit_side = "SELL" if side == "BUY" else "BUY"
         if self.dry_run:
             self.entry_price = mid
             self.position_qty = qty
         else:
             self.wallet_before = usdt_wallet(self.client)
-            r = self.client.place_order(symbol=self.symbol, side="BUY", type="MARKET",
+            r = self.client.place_order(symbol=self.symbol, side=side, type="MARKET",
                                         quantity=f"{qty.normalize():f}",
                                         newOrderRespType="RESULT",
                                         newClientOrderId=f"CJF-IN_{self.seq}")
@@ -205,14 +210,16 @@ class CompoundFuturesTrader:
         self.sl_price = (round_to(self.price_from_roe(self.stop, -1),
                                   self.filters["tick_size"])
                          if self.stop is not None else None)
-        print(f"    ENTER [cj_compound] LONG {self.position_qty.normalize():f} "
+        liq_sign = -1 if side == "BUY" else 1
+        print(f"    ENTER [cj_compound] {'LONG' if side == 'BUY' else 'SHORT'} "
+              f"{self.position_qty.normalize():f} "
               f"@ {self.entry_price:.2f} (capital {self.capital:.2f} x{self.leverage}) "
               f"TP {self.tp_price} SL {self.sl_price or 'none'} "
-              f"liq ~{self.entry_price * (1 - 1 / Decimal(self.leverage)):.0f}")
+              f"liq ~{self.entry_price * (1 + liq_sign / Decimal(self.leverage)):.0f}")
         if not self.dry_run:
             self.algo_ids = []
             tp = self.client.place_algo_order(
-                symbol=self.symbol, side="SELL", type="TAKE_PROFIT_MARKET",
+                symbol=self.symbol, side=exit_side, type="TAKE_PROFIT_MARKET",
                 triggerPrice=f"{self.tp_price.normalize():f}",
                 closePosition="true", clientAlgoId=f"CJF-TP_{self.seq}")
             if tp["status"] == 200:
@@ -221,7 +228,7 @@ class CompoundFuturesTrader:
                 print(f"    TP order REJECTED: {tp['body'].get('msg', tp['body'])}")
             if self.sl_price is not None:
                 sl = self.client.place_algo_order(
-                    symbol=self.symbol, side="SELL", type="STOP_MARKET",
+                    symbol=self.symbol, side=exit_side, type="STOP_MARKET",
                     triggerPrice=f"{self.sl_price.normalize():f}",
                     closePosition="true", clientAlgoId=f"CJF-SL_{self.seq}")
                 if sl["status"] == 200:
@@ -234,6 +241,8 @@ class CompoundFuturesTrader:
     def settle(self, exit_price, how):
         if self.dry_run:
             pnl = (exit_price - self.entry_price) * self.position_qty
+            if self.position_side == "SELL":
+                pnl = -pnl
         else:
             wallet_now = usdt_wallet(self.client)
             pnl = (wallet_now - self.wallet_before
@@ -271,23 +280,27 @@ class CompoundFuturesTrader:
                + Decimal(book["body"]["askPrice"])) / 2
 
         if self.position_qty == 0:
-            if self.entry_filter.mode != "always":
+            f = self.entry_filter
+            if f.mode != "always" or f.direction == "auto":
                 if time.time() - self.last_candles_fetch > 60:
                     kl = self.client.klines(self.symbol, "3m", limit=100)
                     if kl["status"] == 200:
                         self.candles = kl["body"]
                         self.last_candles_fetch = time.time()
-                allowed, self.filter_reason = self.entry_filter.ok(
-                    self.candles, float(mid))
-                if allowed:
-                    self.enter(mid)
+                side, self.filter_reason = f.decide(self.candles, float(mid))
             else:
-                self.enter(mid)
+                side, self.filter_reason = f.decide(None, float(mid))
+            if side:
+                self.enter(mid, side)
         elif self.dry_run:
-            self.last_unrealized = (mid - self.entry_price) * self.position_qty
-            if mid >= self.tp_price:
+            sign = 1 if self.position_side == "BUY" else -1
+            self.last_unrealized = (mid - self.entry_price) * self.position_qty * sign
+            tp_hit = mid >= self.tp_price if sign == 1 else mid <= self.tp_price
+            sl_hit = (self.sl_price is not None
+                      and (mid <= self.sl_price if sign == 1 else mid >= self.sl_price))
+            if tp_hit:
                 self.settle(self.tp_price, "TAKE-PROFIT hit")
-            elif self.sl_price is not None and mid <= self.sl_price:
+            elif sl_hit:
                 self.settle(self.sl_price, "STOP hit")
         else:
             pos = self.client.position(self.symbol)
@@ -299,7 +312,8 @@ class CompoundFuturesTrader:
                     self.settle(mid, "position closed on exchange")
 
         meter = self.client.meter
-        state = (f"holding {self.position_qty.normalize():f} @ {self.entry_price:.2f} "
+        state = (f"holding {'LONG' if self.position_side == 'BUY' else 'SHORT'} "
+                 f"{self.position_qty.normalize():f} @ {self.entry_price:.2f} "
                  f"uPnL {self.last_unrealized:+.2f}" if self.position_qty
                  else "flat" + (f" [{self.filter_reason}]" if self.filter_reason else ""))
         print(f"[{time.strftime('%H:%M:%S')}] mid={mid.normalize():f} | {state} | "
@@ -359,7 +373,8 @@ class CompoundFuturesTrader:
     def shutdown(self):
         if not self.dry_run and self.position_qty:
             print("closing the open position and cancelling exit orders...")
-            self.client.place_order(symbol=self.symbol, side="SELL", type="MARKET",
+            close_side = "SELL" if self.position_side == "BUY" else "BUY"
+            self.client.place_order(symbol=self.symbol, side=close_side, type="MARKET",
                                     quantity=f"{self.position_qty.normalize():f}",
                                     reduceOnly="true", newOrderRespType="RESULT")
             self.cancel_algos()
@@ -389,6 +404,9 @@ def main():
     p.add_argument("--duration", type=float, default=None)
     p.add_argument("--entry", default="always", choices=EntryFilter.MODES,
                    help="entry gate: always / trend / fvg / trend+fvg")
+    p.add_argument("--direction", default="long", choices=EntryFilter.DIRECTIONS,
+                   help="long / short / auto (supertrend picks the side; "
+                        "fvg mode then uses bullish or bearish gaps to match)")
     p.add_argument("--trade", action="store_true",
                    help="place real futures-testnet orders (default: dry-run)")
     p.add_argument("--check", action="store_true")
@@ -446,7 +464,8 @@ def main():
                                    pct(args.target),
                                    pct(args.stop) if args.stop else None,
                                    args.capital, args.interval,
-                                   entry_filter=EntryFilter(args.entry))
+                                   entry_filter=EntryFilter(args.entry,
+                                                            args.direction))
     trader.run(args.duration, stop_event)
 
 

@@ -191,47 +191,83 @@ def bullish_fvgs(candles, lookback=100):
     return zones
 
 
+def bearish_fvgs(candles, lookback=100):
+    """Mirror image: candle A's LOW > candle C's HIGH leaves a gap above the
+    market (C.high, A.low); price rallying back INTO it is the short entry.
+    The gap dies when a later candle's high trades through the zone top."""
+    zones = []
+    cs = candles[-lookback:]
+    for i in range(len(cs) - 2):
+        gap_top = float(cs[i][3])           # low of candle A
+        gap_bottom = float(cs[i + 2][2])    # high of candle C
+        if gap_top > gap_bottom:
+            invalidated = any(float(c[2]) >= gap_top for c in cs[i + 3:])
+            if not invalidated:
+                zones.append((gap_bottom, gap_top))
+    return zones
+
+
 class EntryFilter:
-    """Gates long entries. Modes:
-      always     no gate — enter whenever flat
-      trend      supertrend direction must be up
-      fvg        price must have retraced INTO an unfilled bullish FVG
-      trend+fvg  both
+    """Decides IF an entry is allowed and WHICH side it should be.
+    Modes: always / trend / fvg / trend+fvg.
+    Directions: long, short, or auto (supertrend picks the side; bearish
+    setups use the mirrored checks — trend down, bearish FVG retrace).
     Shared by the spot strategy, the futures trader, and the backtester."""
 
     MODES = ("always", "trend", "fvg", "trend+fvg")
+    DIRECTIONS = ("long", "short", "auto")
 
-    def __init__(self, mode="always", length=20, multiplier=4.0):
+    def __init__(self, mode="always", direction="long", length=20, multiplier=4.0):
         if mode not in self.MODES:
             raise ValueError(f"entry mode {mode!r} not in {self.MODES}")
+        if direction not in self.DIRECTIONS:
+            raise ValueError(f"direction {direction!r} not in {self.DIRECTIONS}")
         self.mode = mode
+        self.direction = direction
         self.length = length
         self.multiplier = multiplier
 
-    def ok(self, candles, price):
-        """-> (allowed, reason). price is a float; candles are raw klines."""
-        if self.mode == "always":
-            return True, "always-in"
+    def _trend(self, candles):
+        highs = [float(k[2]) for k in candles]
+        lows = [float(k[3]) for k in candles]
+        closes = [float(k[4]) for k in candles]
+        _, direction = supertrend(highs, lows, closes, self.length, self.multiplier)
+        return direction
+
+    def decide(self, candles, price):
+        """-> (side, reason): side is 'BUY', 'SELL', or None (stay flat)."""
+        needs_candles = self.mode != "always" or self.direction == "auto"
+        if not needs_candles:
+            return ("BUY" if self.direction == "long" else "SELL"), "always-in"
         if not candles or len(candles) < self.length + 3:
-            return False, "waiting for candle history"
+            return None, "waiting for candle history"
+
+        trend = self._trend(candles)
+        if self.direction == "auto":
+            side = "BUY" if trend == 1 else "SELL"
+        else:
+            side = "BUY" if self.direction == "long" else "SELL"
         reasons = []
-        if "trend" in self.mode:
-            highs = [float(k[2]) for k in candles]
-            lows = [float(k[3]) for k in candles]
-            closes = [float(k[4]) for k in candles]
-            _, direction = supertrend(highs, lows, closes,
-                                      self.length, self.multiplier)
-            if direction != 1:
-                return False, "trend is DOWN"
-            reasons.append("trend up")
+        if "trend" in self.mode or self.direction == "auto":
+            want = 1 if side == "BUY" else -1
+            if trend != want:
+                return None, (f"trend is {'UP' if trend == 1 else 'DOWN'}, "
+                              f"waiting for {'UP' if want == 1 else 'DOWN'}")
+            reasons.append(f"trend {'up' if want == 1 else 'down'}")
         if "fvg" in self.mode:
-            zones = bullish_fvgs(candles)
+            zones = bullish_fvgs(candles) if side == "BUY" else bearish_fvgs(candles)
             hit = next((z for z in zones if z[0] <= price <= z[1]), None)
             if hit is None:
-                return False, (f"price not inside any of the "
-                               f"{len(zones)} open bullish FVGs")
+                kind = "bullish" if side == "BUY" else "bearish"
+                return None, (f"price not inside any of the "
+                              f"{len(zones)} open {kind} FVGs")
             reasons.append(f"in FVG {hit[0]:.2f}-{hit[1]:.2f}")
-        return True, " + ".join(reasons)
+        return side, " + ".join(reasons)
+
+    def ok(self, candles, price):
+        """Legacy long-only gate (spot cannot short)."""
+        side, reason = self.decide(candles, price)
+        return side == "BUY", reason
 
 
 # --------------------------------------------------------------- cj_compound
