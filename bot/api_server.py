@@ -65,6 +65,19 @@ def backtest_cmd_prefix():
     return [sys.executable, "-u",
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest.py")]
 
+
+def futures_cmd_prefix():
+    override = os.environ.get("GRIDBOT_FUTURES_CMD")
+    if override:
+        try:
+            return json.loads(override)
+        except ValueError:
+            pass
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--service", "futures"]
+    return [sys.executable, "-u",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "futures.py")]
+
 def price_spec(value):
     """Absolute price ('59000') or percent offset from the mid ('-3%')."""
     s = str(value).strip()
@@ -229,7 +242,38 @@ class BotManager:
             if self.proc is not None and self.proc.poll() is None:
                 return False, "bot is already running - stop it first"
             symbol = (params.get("symbol") or "BTCUSDT").strip().upper()
-            if backtest:
+            strategies_req = [s for s in (params.get("strategies") or ["grid"])
+                              if s in VALID_STRATEGIES]
+            futures_run = (not check and not backtest and "cj" in strategies_req
+                           and params.get("cj_leverage") not in (None, "", "0", "1"))
+            if futures_run:
+                # CJ compound with leverage runs on the FUTURES TESTNET via
+                # futures.py (needs futures-testnet keys, not spot demo keys)
+                cmd = futures_cmd_prefix() + ["--symbol", symbol]
+                try:
+                    cmd += ["--leverage", str(int(params["cj_leverage"]))]
+                    if params.get("cj_target"):
+                        cmd.append(f"--target={price_spec(params['cj_target'])}")
+                    if params.get("cj_stop"):
+                        cmd.append(f"--stop={price_spec(params['cj_stop'])}")
+                    if params.get("total_quote"):
+                        cmd += ["--capital", str(float(params["total_quote"]))]
+                    if params.get("interval"):
+                        cmd += ["--interval", str(float(params["interval"]))]
+                    if params.get("duration"):
+                        cmd += ["--duration", str(float(params["duration"]))]
+                except (TypeError, ValueError, KeyError) as e:
+                    return False, f"bad futures parameter: {e}"
+                if params.get("trade"):
+                    if not (self.api_key and self.api_secret):
+                        return False, ("futures trading needs FUTURES TESTNET keys "
+                                       "(testnet.binancefuture.com) saved in the "
+                                       "credentials card")
+                    cmd.append("--trade")
+                    self.mode = "trading (futures)"
+                else:
+                    self.mode = "dry-run (futures)"
+            elif backtest:
                 cmd = backtest_cmd_prefix() + ["--symbol", symbol]
                 strategies = [s for s in (params.get("strategies") or ["grid"])
                               if s in VALID_STRATEGIES]
