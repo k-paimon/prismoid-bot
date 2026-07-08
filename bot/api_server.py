@@ -85,6 +85,13 @@ def price_spec(value):
     return s
 
 
+def entry_mode(value):
+    s = str(value).strip().lower()
+    if s not in ("always", "trend", "fvg", "trend+fvg"):
+        raise ValueError(s)
+    return s
+
+
 def spreads_spec(value):
     """Comma list of spreads, each a percent ('0.1%') or fraction ('0.001')."""
     tokens = [t.strip() for t in str(value).split(",") if t.strip()]
@@ -109,6 +116,7 @@ NUMERIC_FLAGS = {
     "cj_target": ("--cj-target", price_spec),
     "cj_stop": ("--cj-stop", price_spec),
     "cj_cooldown": ("--cj-cooldown", float),
+    "cj_entry": ("--cj-entry", entry_mode),
     "total_quote": ("--total-quote", float),
     "interval": ("--interval", float),
     "duration": ("--duration", float),
@@ -262,6 +270,10 @@ class BotManager:
                         cmd += ["--interval", str(float(params["interval"]))]
                     if params.get("duration"):
                         cmd += ["--duration", str(float(params["duration"]))]
+                    entry = str(params.get("cj_entry") or "always").strip().lower()
+                    if entry not in ("always", "trend", "fvg", "trend+fvg"):
+                        return False, f"bad entry mode: {entry!r}"
+                    cmd += ["--entry", entry]
                 except (TypeError, ValueError, KeyError) as e:
                     return False, f"bad futures parameter: {e}"
                 if params.get("trade"):

@@ -29,6 +29,7 @@ from decimal import Decimal, ROUND_DOWN
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from binance_client import BASES, WEIGHTS, BinanceClient, IPBanError, RequestMeter  # noqa: E402
+from strategies import EntryFilter  # noqa: E402
 
 BASES["futures-testnet"] = "https://testnet.binancefuture.com"
 BASES["futures-live"] = "https://fapi.binance.com"
@@ -70,6 +71,10 @@ class FuturesClient(BinanceClient):
 
     def book_ticker(self, symbol):
         return self._request("GET", "/fapi/v1/ticker/bookTicker", {"symbol": symbol})
+
+    def klines(self, symbol, interval, limit=100):
+        return self._request("GET", "/fapi/v1/klines",
+                             {"symbol": symbol, "interval": interval, "limit": limit})
 
     def balance(self):
         return self._request("GET", "/fapi/v2/balance", signed=True)
@@ -119,7 +124,8 @@ def usdt_wallet(client):
 
 
 class CompoundFuturesTrader:
-    def __init__(self, client, symbol, leverage, target, stop, capital, interval):
+    def __init__(self, client, symbol, leverage, target, stop, capital, interval,
+                 entry_filter=None):
         self.client = client
         self.symbol = symbol
         self.leverage = leverage
@@ -130,6 +136,10 @@ class CompoundFuturesTrader:
         self.interval = interval
         self.dry_run = not client.can_sign
         self.filters = None
+        self.entry_filter = entry_filter or EntryFilter("always")
+        self.candles = None
+        self.last_candles_fetch = 0
+        self.filter_reason = ""
         # per-trade state
         self.position_qty = Decimal("0")
         self.entry_price = None
@@ -240,7 +250,18 @@ class CompoundFuturesTrader:
                + Decimal(book["body"]["askPrice"])) / 2
 
         if self.position_qty == 0:
-            self.enter(mid)
+            if self.entry_filter.mode != "always":
+                if time.time() - self.last_candles_fetch > 60:
+                    kl = self.client.klines(self.symbol, "3m", limit=100)
+                    if kl["status"] == 200:
+                        self.candles = kl["body"]
+                        self.last_candles_fetch = time.time()
+                allowed, self.filter_reason = self.entry_filter.ok(
+                    self.candles, float(mid))
+                if allowed:
+                    self.enter(mid)
+            else:
+                self.enter(mid)
         elif self.dry_run:
             self.last_unrealized = (mid - self.entry_price) * self.position_qty
             if mid >= self.tp_price:
@@ -258,7 +279,8 @@ class CompoundFuturesTrader:
 
         meter = self.client.meter
         state = (f"holding {self.position_qty.normalize():f} @ {self.entry_price:.2f} "
-                 f"uPnL {self.last_unrealized:+.2f}" if self.position_qty else "flat")
+                 f"uPnL {self.last_unrealized:+.2f}" if self.position_qty
+                 else "flat" + (f" [{self.filter_reason}]" if self.filter_reason else ""))
         print(f"[{time.strftime('%H:%M:%S')}] mid={mid.normalize():f} | {state} | "
               f"capital {self.capital:.2f} ({self.wins}W/{self.losses}L) | "
               f"weight-1m={meter.used_weight_1m} reqs={meter.total_requests}")
@@ -328,6 +350,8 @@ def main():
                    help="starting capital in USDT (always all-in)")
     p.add_argument("--interval", type=float, default=5, help="tick seconds")
     p.add_argument("--duration", type=float, default=None)
+    p.add_argument("--entry", default="always", choices=EntryFilter.MODES,
+                   help="entry gate: always / trend / fvg / trend+fvg")
     p.add_argument("--trade", action="store_true",
                    help="place real futures-testnet orders (default: dry-run)")
     p.add_argument("--check", action="store_true")
@@ -384,7 +408,8 @@ def main():
     trader = CompoundFuturesTrader(client, args.symbol, args.leverage,
                                    pct(args.target),
                                    pct(args.stop) if args.stop else None,
-                                   args.capital, args.interval)
+                                   args.capital, args.interval,
+                                   entry_filter=EntryFilter(args.entry))
     trader.run(args.duration, stop_event)
 
 

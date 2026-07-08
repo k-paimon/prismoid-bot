@@ -172,6 +172,68 @@ class PMMSimple:
         return f"pmm_simple: {self.fills} maker fills"
 
 
+# ------------------------------------------------------------- entry filters
+
+def bullish_fvgs(candles, lookback=100):
+    """Unfilled bullish fair value gaps, newest last. 3-candle definition:
+    candle A's HIGH < candle C's LOW leaves a gap (A.high, C.low) carved by the
+    displacement candle B. The gap dies when a later candle's low trades back
+    through the bottom of the zone."""
+    zones = []
+    cs = candles[-lookback:]
+    for i in range(len(cs) - 2):
+        gap_bottom = float(cs[i][2])        # high of candle A
+        gap_top = float(cs[i + 2][3])       # low of candle C
+        if gap_top > gap_bottom:
+            invalidated = any(float(c[3]) <= gap_bottom for c in cs[i + 3:])
+            if not invalidated:
+                zones.append((gap_bottom, gap_top))
+    return zones
+
+
+class EntryFilter:
+    """Gates long entries. Modes:
+      always     no gate — enter whenever flat
+      trend      supertrend direction must be up
+      fvg        price must have retraced INTO an unfilled bullish FVG
+      trend+fvg  both
+    Shared by the spot strategy, the futures trader, and the backtester."""
+
+    MODES = ("always", "trend", "fvg", "trend+fvg")
+
+    def __init__(self, mode="always", length=20, multiplier=4.0):
+        if mode not in self.MODES:
+            raise ValueError(f"entry mode {mode!r} not in {self.MODES}")
+        self.mode = mode
+        self.length = length
+        self.multiplier = multiplier
+
+    def ok(self, candles, price):
+        """-> (allowed, reason). price is a float; candles are raw klines."""
+        if self.mode == "always":
+            return True, "always-in"
+        if not candles or len(candles) < self.length + 3:
+            return False, "waiting for candle history"
+        reasons = []
+        if "trend" in self.mode:
+            highs = [float(k[2]) for k in candles]
+            lows = [float(k[3]) for k in candles]
+            closes = [float(k[4]) for k in candles]
+            _, direction = supertrend(highs, lows, closes,
+                                      self.length, self.multiplier)
+            if direction != 1:
+                return False, "trend is DOWN"
+            reasons.append("trend up")
+        if "fvg" in self.mode:
+            zones = bullish_fvgs(candles)
+            hit = next((z for z in zones if z[0] <= price <= z[1]), None)
+            if hit is None:
+                return False, (f"price not inside any of the "
+                               f"{len(zones)} open bullish FVGs")
+            reasons.append(f"in FVG {hit[0]:.2f}-{hit[1]:.2f}")
+        return True, " + ".join(reasons)
+
+
 # --------------------------------------------------------------- cj_compound
 
 class CjCompound:
@@ -183,12 +245,15 @@ class CjCompound:
     PREFIX = "CJ"
 
     def __init__(self, target_pct=Decimal("0.03"), stop_pct=None,
-                 total_amount_quote=Decimal("200"), reentry_cooldown=0):
+                 total_amount_quote=Decimal("200"), reentry_cooldown=0,
+                 entry_filter=None):
         self.target_pct = Decimal(target_pct)
         self.stop_pct = Decimal(stop_pct) if stop_pct not in (None, "") else None
         self.start_capital = Decimal(total_amount_quote)
         self.capital = Decimal(total_amount_quote)
         self.reentry_cooldown = reentry_cooldown    # seconds flat between trades
+        self.entry_filter = entry_filter or EntryFilter("always")
+        self.last_filter_reason = ""
         self.position_qty = Decimal("0")
         self.entry_price = None
         self.last_exit_ts = None    # stamped from state.ts (works in backtests too)
@@ -206,6 +271,10 @@ class CjCompound:
                 self._exit_pending = False
             if (self.last_exit_ts is not None
                     and state.ts - self.last_exit_ts < self.reentry_cooldown):
+                return []
+            allowed, reason = self.entry_filter.ok(state.candles, float(state.mid))
+            self.last_filter_reason = reason
+            if not allowed:
                 return []
             self._seq += 1
             return [{"tag": f"{self.PREFIX}-IN", "side": "BUY", "type": "MARKET",
@@ -243,9 +312,11 @@ class CjCompound:
     def summary(self):
         growth = (self.capital / self.start_capital - 1) * 100
         state = (f"holding {self.position_qty.quantize(Decimal('0.00000001')).normalize():f} "
-                 f"@ {self.entry_price:.2f}" if self.position_qty else "flat")
+                 f"@ {self.entry_price:.2f}" if self.position_qty
+                 else f"flat ({self.last_filter_reason or 'no signal yet'})")
         return (f"cj_compound: {self.wins} wins, {self.losses} losses; capital "
-                f"{self.start_capital:.2f} -> {self.capital:.2f} ({growth:+.2f}%); {state}")
+                f"{self.start_capital:.2f} -> {self.capital:.2f} ({growth:+.2f}%); "
+                f"entry={self.entry_filter.mode}; {state}")
 
 
 # -------------------------------------------------------------- supertrend_v1

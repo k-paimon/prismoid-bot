@@ -23,8 +23,8 @@ from decimal import Decimal, ROUND_DOWN, ROUND_UP
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from binance_client import BinanceClient, IPBanError, RequestMeter, WEIGHTS  # noqa: E402
-from strategies import (CjCompound, GridStrike, MarketState, PMMSimple,  # noqa: E402
-                        Supertrend, round_to)
+from strategies import (CjCompound, EntryFilter, GridStrike, MarketState,  # noqa: E402
+                        PMMSimple, Supertrend, round_to)
 
 MAX_PLACEMENTS_PER_TICK = 8     # keep well inside the 50-orders/10s bucket
 
@@ -563,6 +563,10 @@ def add_strategy_args(p):
                         "hold until the target is reached)")
     p.add_argument("--cj-cooldown", type=float, default=0,
                    help="cj_compound seconds to stay flat between trades")
+    p.add_argument("--cj-entry", default="always", choices=EntryFilter.MODES,
+                   help="entry gate: always / trend (supertrend up) / fvg "
+                        "(price inside an unfilled bullish fair value gap) / "
+                        "trend+fvg")
 
 
 def _pct(tok):
@@ -606,7 +610,8 @@ def build_strategies(args):
         chosen["CJ"] = CjCompound(target_pct=_pct(args.cj_target),
                                   stop_pct=_pct(args.cj_stop) if args.cj_stop else None,
                                   total_amount_quote=args.total_quote,
-                                  reentry_cooldown=args.cj_cooldown)
+                                  reentry_cooldown=args.cj_cooldown,
+                                  entry_filter=EntryFilter(args.cj_entry))
     return chosen
 
 

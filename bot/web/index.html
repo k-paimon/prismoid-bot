@@ -243,6 +243,14 @@
         <label title="Take-profit per trade: sell everything once price is this far above entry, then re-enter with the new capital"><span class="tt">Target gain</span> <input type="text" id="cj_target" placeholder="3%"></label>
         <label title="Optional: exit at a loss if price falls this far below entry. BLANK = no stop — the position is held until the target hits, however long (and deep) that gets"><span class="tt">Stop loss</span> <input type="text" id="cj_stop" placeholder="blank = none"></label>
       </div>
+      <label title="When is a new entry allowed? always = re-enter the moment you're flat. trend = only while supertrend says the market is trending up. fvg = only when price has retraced into an unfilled bullish fair value gap (a 3-candle imbalance acting as a 'discount' zone). trend+fvg = both must agree — fewest trades, most selective entries"><span class="tt">Entry condition</span>
+        <select id="cj_entry">
+          <option value="always">always — re-enter immediately</option>
+          <option value="trend">trend up (supertrend)</option>
+          <option value="fvg">bullish FVG retrace</option>
+          <option value="trend+fvg">trend up + FVG retrace</option>
+        </select>
+      </label>
       <div class="row2">
         <label title="Seconds to stay flat after an exit before buying back in. 0 = re-enter immediately. (Spot mode only)"><span class="tt">Re-entry cooldown (s)</span> <input type="text" id="cj_cooldown" placeholder="0"></label>
         <label title="Blank or 1 = spot demo. 2+ = FUTURES TESTNET with this leverage: target/stop stay as PnL on capital, so the needed price move shrinks to target/leverage — but so does the liquidation distance (~100%/leverage). Needs futures-testnet keys from testnet.binancefuture.com"><span class="tt">Leverage (futures)</span> <input type="text" id="cj_leverage" placeholder="blank = spot"></label>
@@ -310,13 +318,13 @@ const $ = id => document.getElementById(id);
 const PARAM_IDS = ["symbol","grid_start","grid_end","grid_limit","grid_levels",
                    "grid_max_open","pmm_spreads","pmm_refresh",
                    "st_length","st_multiplier","st_threshold",
-                   "cj_target","cj_stop","cj_cooldown","cj_leverage",
+                   "cj_target","cj_stop","cj_cooldown","cj_leverage","cj_entry",
                    "total_quote","interval"];
 const STRATEGY_PARAM_IDS = {
   grid: ["grid_start","grid_end","grid_limit","grid_levels","grid_max_open"],
   pmm: ["pmm_spreads","pmm_refresh"],
   supertrend: ["st_length","st_multiplier","st_threshold"],
-  cj: ["cj_target","cj_stop","cj_cooldown","cj_leverage"],
+  cj: ["cj_target","cj_stop","cj_cooldown","cj_leverage","cj_entry"],
 };
 
 function pickedStrategy() {
