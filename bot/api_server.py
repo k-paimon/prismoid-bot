@@ -93,11 +93,14 @@ NUMERIC_FLAGS = {
     "st_length": ("--st-length", int),
     "st_multiplier": ("--st-multiplier", float),
     "st_threshold": ("--st-threshold", price_spec),
+    "cj_target": ("--cj-target", price_spec),
+    "cj_stop": ("--cj-stop", price_spec),
+    "cj_cooldown": ("--cj-cooldown", float),
     "total_quote": ("--total-quote", float),
     "interval": ("--interval", float),
     "duration": ("--duration", float),
 }
-VALID_STRATEGIES = {"grid", "pmm", "supertrend"}
+VALID_STRATEGIES = {"grid", "pmm", "supertrend", "cj"}
 
 
 class BotManager:

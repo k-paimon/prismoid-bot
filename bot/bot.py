@@ -23,7 +23,8 @@ from decimal import Decimal, ROUND_DOWN, ROUND_UP
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from binance_client import BinanceClient, IPBanError, RequestMeter, WEIGHTS  # noqa: E402
-from strategies import GridStrike, MarketState, PMMSimple, Supertrend, round_to  # noqa: E402
+from strategies import (CjCompound, GridStrike, MarketState, PMMSimple,  # noqa: E402
+                        Supertrend, round_to)
 
 MAX_PLACEMENTS_PER_TICK = 8     # keep well inside the 50-orders/10s bucket
 
@@ -117,7 +118,8 @@ class PnLTracker:
         return line
 
 
-STRATEGY_NAMES = {"GS": "grid_strike", "PMM": "pmm_simple", "ST": "supertrend_v1"}
+STRATEGY_NAMES = {"GS": "grid_strike", "PMM": "pmm_simple",
+                  "ST": "supertrend_v1", "CJ": "cj_compound"}
 
 
 def weight_limit_from(rate_limits):
@@ -554,6 +556,18 @@ def add_strategy_args(p):
     p.add_argument("--st-threshold", default="1%",
                    help="supertrend entry threshold: max distance from the trend "
                         "line, e.g. 1%% (or 0.01)")
+    p.add_argument("--cj-target", default="3%",
+                   help="cj_compound take-profit per trade, e.g. 3%%")
+    p.add_argument("--cj-stop", default=None,
+                   help="cj_compound stop loss, e.g. 1.5%% (default: none — "
+                        "hold until the target is reached)")
+    p.add_argument("--cj-cooldown", type=float, default=0,
+                   help="cj_compound seconds to stay flat between trades")
+
+
+def _pct(tok):
+    tok = str(tok).strip()
+    return Decimal(tok[:-1]) / 100 if tok.endswith("%") else Decimal(tok)
 
 
 def build_strategies(args):
@@ -588,6 +602,11 @@ def build_strategies(args):
                                   multiplier=args.st_multiplier,
                                   percentage_threshold=threshold,
                                   order_amount_quote=args.total_quote)
+    if "cj" in wanted or "compound" in wanted:
+        chosen["CJ"] = CjCompound(target_pct=_pct(args.cj_target),
+                                  stop_pct=_pct(args.cj_stop) if args.cj_stop else None,
+                                  total_amount_quote=args.total_quote,
+                                  reentry_cooldown=args.cj_cooldown)
     return chosen
 
 

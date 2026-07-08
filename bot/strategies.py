@@ -172,6 +172,82 @@ class PMMSimple:
         return f"pmm_simple: {self.fills} maker fills"
 
 
+# --------------------------------------------------------------- cj_compound
+
+class CjCompound:
+    """CJ's compounding strategy: always ALL-IN with current capital, take
+    profit at +target (default 3%), optional stop loss, then immediately
+    re-enter with the grown (or shrunk) capital. Exponential by construction:
+    capital after n winning trades = start x (1+target)^n."""
+
+    PREFIX = "CJ"
+
+    def __init__(self, target_pct=Decimal("0.03"), stop_pct=None,
+                 total_amount_quote=Decimal("200"), reentry_cooldown=0):
+        self.target_pct = Decimal(target_pct)
+        self.stop_pct = Decimal(stop_pct) if stop_pct not in (None, "") else None
+        self.start_capital = Decimal(total_amount_quote)
+        self.capital = Decimal(total_amount_quote)
+        self.reentry_cooldown = reentry_cooldown    # seconds flat between trades
+        self.position_qty = Decimal("0")
+        self.entry_price = None
+        self.last_exit_ts = None    # stamped from state.ts (works in backtests too)
+        self._exit_pending = False
+        self.wins = self.losses = 0
+        self._seq = 0
+
+    def tags(self):
+        return [f"{self.PREFIX}-IN", f"{self.PREFIX}-TP", f"{self.PREFIX}-OUT"]
+
+    def desired_orders(self, state):
+        if self.position_qty == 0:
+            if self._exit_pending:
+                self.last_exit_ts = state.ts
+                self._exit_pending = False
+            if (self.last_exit_ts is not None
+                    and state.ts - self.last_exit_ts < self.reentry_cooldown):
+                return []
+            self._seq += 1
+            return [{"tag": f"{self.PREFIX}-IN", "side": "BUY", "type": "MARKET",
+                     "quote_qty": self.capital, "once": self._seq}]
+        # holding: stop loss beats take-profit if both would apply
+        if (self.stop_pct is not None
+                and state.mid <= self.entry_price * (1 - self.stop_pct)):
+            self._seq += 1
+            return [{"tag": f"{self.PREFIX}-OUT", "side": "SELL", "type": "MARKET",
+                     "qty": self.position_qty, "once": self._seq}]
+        return [{"tag": f"{self.PREFIX}-TP", "side": "SELL", "type": "LIMIT_MAKER",
+                 "price": self.entry_price * (1 + self.target_pct),
+                 "qty": self.position_qty}]
+
+    def on_fill(self, tag, order_body):
+        qty = Decimal(order_body.get("executedQty", "0"))
+        # market orders report price=0; the traded value is cummulativeQuoteQty
+        quote_val = Decimal(order_body.get("cummulativeQuoteQty", "0") or "0")
+        if not quote_val:
+            quote_val = qty * Decimal(order_body.get("price", "0") or "0")
+        if tag == f"{self.PREFIX}-IN":
+            self.position_qty = qty
+            self.entry_price = quote_val / qty if qty else None
+        else:
+            if quote_val:
+                if quote_val > self.capital:
+                    self.wins += 1
+                else:
+                    self.losses += 1
+                self.capital = quote_val
+            self.position_qty = Decimal("0")
+            self.entry_price = None
+            self._exit_pending = True
+
+    def summary(self):
+        growth = (self.capital / self.start_capital - 1) * 100
+        state = (f"holding {self.position_qty.quantize(Decimal('0.00000001')).normalize():f} "
+                 f"@ {self.entry_price:.2f}" if self.position_qty else "flat")
+        return (f"cj_compound: {self.wins} wins, {self.losses} losses; capital "
+                f"{self.start_capital:.2f} -> {self.capital:.2f} ({growth:+.2f}%); {state}")
+
+
 # -------------------------------------------------------------- supertrend_v1
 
 def supertrend(highs, lows, closes, length=20, multiplier=4.0):

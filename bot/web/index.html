@@ -185,6 +185,7 @@
       <label title="Rests a ladder of buy orders below the price; every fill is resold one grid level higher, pocketing the step. Best in sideways, choppy markets"><input type="radio" name="strategy" value="grid" checked> <span class="tt">grid strike</span></label>
       <label title="Market making: continuously quotes buys and sells around the mid price and refreshes them as it moves. Earns the spread while price oscillates"><input type="radio" name="strategy" value="pmm"> <span class="tt">pmm simple</span></label>
       <label title="Trend following: buys when the Supertrend indicator turns bullish near the trend line, sells the position when it flips bearish. Best in trending markets"><input type="radio" name="strategy" value="supertrend"> <span class="tt">supertrend</span></label>
+      <label title="CJ's compounding system: ALL-IN with current capital, sell at +target, re-enter with the grown capital. Exponential when it wins — backtest it before trading it"><input type="radio" name="strategy" value="cj"> <span class="tt">cj compound</span></label>
     </div>
   </div>
 
@@ -234,6 +235,20 @@
         <label title="Only enter when price is within this distance of the trend line — avoids buying far above support. e.g. 1%"><span class="tt">Entry threshold</span> <input type="text" id="st_threshold" placeholder="1%"></label>
         <div></div>
       </div>
+    </div>
+
+    <div id="params_cj" style="display:none">
+      <div class="psec">CJ compound</div>
+      <div class="row2">
+        <label title="Take-profit per trade: sell everything once price is this far above entry, then re-enter with the new capital"><span class="tt">Target gain</span> <input type="text" id="cj_target" placeholder="3%"></label>
+        <label title="Optional: exit at a loss if price falls this far below entry. BLANK = no stop — the position is held until the target hits, however long (and deep) that gets"><span class="tt">Stop loss</span> <input type="text" id="cj_stop" placeholder="blank = none"></label>
+      </div>
+      <div class="row2">
+        <label title="Seconds to stay flat after an exit before buying back in. 0 = re-enter immediately"><span class="tt">Re-entry cooldown (s)</span> <input type="text" id="cj_cooldown" placeholder="0"></label>
+        <div></div>
+      </div>
+      <div class="hint">Uses "Total amount" as the starting capital, then always trades
+        100% of whatever the capital has become.</div>
     </div>
 
     <div class="checks" style="margin-top:12px">
@@ -292,11 +307,13 @@ const $ = id => document.getElementById(id);
 const PARAM_IDS = ["symbol","grid_start","grid_end","grid_limit","grid_levels",
                    "grid_max_open","pmm_spreads","pmm_refresh",
                    "st_length","st_multiplier","st_threshold",
+                   "cj_target","cj_stop","cj_cooldown",
                    "total_quote","interval"];
 const STRATEGY_PARAM_IDS = {
   grid: ["grid_start","grid_end","grid_limit","grid_levels","grid_max_open"],
   pmm: ["pmm_spreads","pmm_refresh"],
   supertrend: ["st_length","st_multiplier","st_threshold"],
+  cj: ["cj_target","cj_stop","cj_cooldown"],
 };
 
 function pickedStrategy() {
