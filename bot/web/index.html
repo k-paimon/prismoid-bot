@@ -245,9 +245,16 @@
   <div class="card">
     <h2>Control</h2>
     <button id="checkBtn" title="Pings Binance, verifies your keys, has the exchange validate a test order, and reports the request cost — nothing is traded">Test connection</button>
-    <button id="startBtn" class="primary" title="Starts the ticked strategies with the parameters above">Start bot</button>
+    <button id="startBtn" class="primary" title="Starts the picked strategy with the parameters above">Start bot</button>
     <button id="stopBtn" class="danger" disabled title="Cancels all the bot's open orders, then prints the PnL and request reports">Stop</button>
-    <div class="hint">Stop cancels the bot's open orders and prints the request report.</div>
+    <div style="margin-top:10px">
+      <button id="backtestBtn" style="margin-top:0" title="Replays real historical candles through the picked strategy with these exact parameters — simulated fills and fees, no orders placed, no keys needed. Results appear in the console">Backtest</button>
+      <label title="How many days of price history to replay" style="display:inline-flex;align-items:center;gap:5px;margin-top:0">
+        <span class="tt">last</span>
+        <input type="text" id="bt_days" value="7" style="width:44px;margin:0"> days
+      </label>
+    </div>
+    <div class="hint">Backtest answers "would these parameters have made money?" before you run them live.</div>
   </div>
 </div>
 
@@ -335,6 +342,7 @@ function setBadges() {
   b.className = "badge " + (botRunning ? "on" : "");
   for (const [id, off] of [["startBtn", () => !apiUp || botRunning],
                            ["checkBtn", () => !apiUp || botRunning],
+                           ["backtestBtn", () => !apiUp || botRunning],
                            ["stopBtn",  () => !apiUp || !botRunning]]) {
     const btn = $(id);
     if (!btn.classList.contains("loading")) btn.disabled = off();
@@ -461,6 +469,17 @@ $("stopBtn").onclick = () => withLoading($("stopBtn"), async () => {
   const r = await post("/api/stop");
   // bot cancels its open orders before exiting — hold the spinner until done
   if (r.ok) await waitUntil(() => !botRunning, 25000);
+});
+$("backtestBtn").onclick = () => withLoading($("backtestBtn"), async () => {
+  persist();
+  const p = gatherParams();
+  p.days = $("bt_days").value.trim() || "7";
+  delete p.trade;
+  const r = await post("/api/backtest", p);
+  if (r.ok) {                       // spinner for the whole replay
+    await waitUntil(() => botRunning, 5000);
+    await waitUntil(() => !botRunning, 300000);
+  }
 });
 $("trade").onchange = async () => {
   const s = apiUp ? await api("/api/status") : {credentials_set: false};

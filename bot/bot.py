@@ -522,22 +522,11 @@ class BotRunner:
 
 # ------------------------------------------------------------------------ cli
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", choices=["demo", "live"], default="demo",
-                   help="demo = binance.com Demo Mode (watch orders live at "
-                        "demo.binance.com); live = read-only --check only")
+def add_strategy_args(p):
+    """Strategy flags shared by the live bot and the backtester."""
     p.add_argument("--symbol", default="BTCUSDT")
-    p.add_argument("--check", action="store_true",
-                   help="connection + request-cost check, then exit")
-    p.add_argument("--trade", action="store_true",
-                   help="actually place orders (demo account only; default is dry-run)")
     p.add_argument("--strategies", default="grid,pmm,supertrend",
                    help="comma list: grid,pmm,supertrend")
-    p.add_argument("--interval", type=float, default=10, help="tick seconds")
-    p.add_argument("--duration", type=float, default=None,
-                   help="stop after N seconds and print reports")
     p.add_argument("--total-quote", type=Decimal, default=Decimal("200"),
                    help="quote budget: split across levels for grid/pmm; "
                         "amount per entry for supertrend")
@@ -565,10 +554,61 @@ def main():
     p.add_argument("--st-threshold", default="1%",
                    help="supertrend entry threshold: max distance from the trend "
                         "line, e.g. 1%% (or 0.01)")
+
+
+def build_strategies(args):
+    """Instantiate the strategies named in args (shared with the backtester)."""
+    chosen = {}
+    wanted = {s.strip() for s in args.strategies.split(",") if s.strip()}
+    if "grid" in wanted:
+        chosen["GS"] = GridStrike(start_price=args.grid_start, end_price=args.grid_end,
+                                  limit_price=args.grid_limit, n_levels=args.grid_levels,
+                                  total_amount_quote=args.total_quote,
+                                  max_open_orders=args.grid_max_open)
+    if "pmm" in wanted:
+        spreads = []
+        for tok in args.pmm_spreads.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            value = Decimal(tok[:-1]) / 100 if tok.endswith("%") else Decimal(tok)
+            if not Decimal("0") < value < Decimal("0.2"):
+                sys.exit(f"--pmm-spreads: {tok!r} is out of range — use percent "
+                         f"values like 0.1% (fraction equivalents below 0.2)")
+            spreads.append(value)
+        if not spreads:
+            sys.exit("--pmm-spreads: need at least one spread, e.g. 0.1%,0.3%")
+        chosen["PMM"] = PMMSimple(buy_spreads=spreads, sell_spreads=spreads,
+                                  total_amount_quote=args.total_quote,
+                                  executor_refresh_time=args.pmm_refresh)
+    if "supertrend" in wanted:
+        tok = args.st_threshold.strip()
+        threshold = float(tok[:-1]) / 100 if tok.endswith("%") else float(tok)
+        chosen["ST"] = Supertrend(length=args.st_length,
+                                  multiplier=args.st_multiplier,
+                                  percentage_threshold=threshold,
+                                  order_amount_quote=args.total_quote)
+    return chosen
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--mode", choices=["demo", "live"], default="demo",
+                   help="demo = binance.com Demo Mode (watch orders live at "
+                        "demo.binance.com); live = read-only --check only")
+    p.add_argument("--check", action="store_true",
+                   help="connection + request-cost check, then exit")
+    p.add_argument("--trade", action="store_true",
+                   help="actually place orders (demo account only; default is dry-run)")
+    p.add_argument("--interval", type=float, default=10, help="tick seconds")
+    p.add_argument("--duration", type=float, default=None,
+                   help="stop after N seconds and print reports")
     p.add_argument("--keep-orders", action="store_true",
                    help="do not cancel open orders on exit")
     p.add_argument("--credentials-account", default=None)
     p.add_argument("--credentials-base", default="bots")
+    add_strategy_args(p)
     args = p.parse_args()
 
     # let a GUI/parent process stop us gracefully (order cleanup still runs):
@@ -612,36 +652,7 @@ def main():
     elif source:
         print(f"using API keys from {source}")
 
-    chosen = {}
-    wanted = {s.strip() for s in args.strategies.split(",") if s.strip()}
-    if "grid" in wanted:
-        chosen["GS"] = GridStrike(start_price=args.grid_start, end_price=args.grid_end,
-                                  limit_price=args.grid_limit, n_levels=args.grid_levels,
-                                  total_amount_quote=args.total_quote,
-                                  max_open_orders=args.grid_max_open)
-    if "pmm" in wanted:
-        spreads = []
-        for tok in args.pmm_spreads.split(","):
-            tok = tok.strip()
-            if not tok:
-                continue
-            value = Decimal(tok[:-1]) / 100 if tok.endswith("%") else Decimal(tok)
-            if not Decimal("0") < value < Decimal("0.2"):
-                sys.exit(f"--pmm-spreads: {tok!r} is out of range — use percent "
-                         f"values like 0.1% (fraction equivalents below 0.2)")
-            spreads.append(value)
-        if not spreads:
-            sys.exit("--pmm-spreads: need at least one spread, e.g. 0.1%,0.3%")
-        chosen["PMM"] = PMMSimple(buy_spreads=spreads, sell_spreads=spreads,
-                                  total_amount_quote=args.total_quote,
-                                  executor_refresh_time=args.pmm_refresh)
-    if "supertrend" in wanted:
-        tok = args.st_threshold.strip()
-        threshold = float(tok[:-1]) / 100 if tok.endswith("%") else float(tok)
-        chosen["ST"] = Supertrend(length=args.st_length,
-                                  multiplier=args.st_multiplier,
-                                  percentage_threshold=threshold,
-                                  order_amount_quote=args.total_quote)
+    chosen = build_strategies(args)
     if not chosen:
         sys.exit(f"no valid strategies in '{args.strategies}'")
 

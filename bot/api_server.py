@@ -52,6 +52,19 @@ def bot_cmd_prefix():
         return [sys.executable, "--service", "bot"]
     return [sys.executable, "-u", BOT_SCRIPT]
 
+
+def backtest_cmd_prefix():
+    override = os.environ.get("GRIDBOT_BACKTEST_CMD")
+    if override:
+        try:
+            return json.loads(override)
+        except ValueError:
+            pass
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--service", "backtest"]
+    return [sys.executable, "-u",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest.py")]
+
 def price_spec(value):
     """Absolute price ('59000') or percent offset from the mid ('-3%')."""
     s = str(value).strip()
@@ -208,16 +221,38 @@ class BotManager:
                 "stats": self.bot_stats,
             }
 
-    def start(self, params, check=False):
+    def start(self, params, check=False, backtest=False):
         with self.lock:
             if self.proc is not None and self.proc.poll() is None:
                 return False, "bot is already running - stop it first"
             symbol = (params.get("symbol") or "BTCUSDT").strip().upper()
-            cmd = bot_cmd_prefix() + ["--symbol", symbol]
-            if check:
-                cmd.append("--check")
+            if backtest:
+                cmd = backtest_cmd_prefix() + ["--symbol", symbol]
+                strategies = [s for s in (params.get("strategies") or ["grid"])
+                              if s in VALID_STRATEGIES]
+                if not strategies:
+                    return False, "no valid strategies selected"
+                cmd += ["--strategies", ",".join(strategies)]
+                try:
+                    cmd += ["--days", str(float(params.get("days") or 7))]
+                except (TypeError, ValueError):
+                    return False, f"days must be a number: {params.get('days')!r}"
+                for key, (flag, cast) in NUMERIC_FLAGS.items():
+                    if key in ("interval", "duration"):
+                        continue        # live-loop flags; the backtester has none
+                    value = params.get(key)
+                    if value not in (None, ""):
+                        try:
+                            cmd.append(f"{flag}={cast(value)}")
+                        except (TypeError, ValueError):
+                            return False, (f"parameter '{key}' must be a number "
+                                           f"or a percent like -3%: {value!r}")
+                self.mode = "backtest"
+            elif check:
+                cmd = bot_cmd_prefix() + ["--symbol", symbol, "--check"]
                 self.mode = "check"
             else:
+                cmd = bot_cmd_prefix() + ["--symbol", symbol]
                 strategies = [s for s in (params.get("strategies") or ["grid"])
                               if s in VALID_STRATEGIES]
                 if not strategies:
@@ -373,6 +408,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200 if ok else 409, {"ok": ok, "message": msg})
         elif self.path == "/api/check":
             ok, msg = MANAGER.start(body, check=True)
+            self._send(200 if ok else 409, {"ok": ok, "message": msg})
+        elif self.path == "/api/backtest":
+            ok, msg = MANAGER.start(body, backtest=True)
             self._send(200 if ok else 409, {"ok": ok, "message": msg})
         elif self.path == "/api/stop":
             ok, msg = MANAGER.stop()

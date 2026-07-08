@@ -67,6 +67,7 @@ class Service:
         env["PYTHONIOENCODING"] = "utf-8"
         if self.key == "api":
             env["GRIDBOT_BOT_CMD"] = json.dumps(service_cmd("bot"))
+            env["GRIDBOT_BACKTEST_CMD"] = json.dumps(service_cmd("backtest"))
         return env
 
     def start(self, log):
@@ -291,8 +292,12 @@ def main():
             import bot
             sys.argv = ["bot"] + rest
             bot.main()
+        elif name == "backtest":
+            import backtest
+            sys.argv = ["backtest"] + rest
+            backtest.main()
         else:
-            sys.exit(f"unknown --service {name!r} (use api, web, or bot)")
+            sys.exit(f"unknown --service {name!r} (use api, web, bot, or backtest)")
         return
     run_gui()
 

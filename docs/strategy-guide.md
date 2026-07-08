@@ -130,6 +130,32 @@ Missing entries → widen the entry threshold (e.g. 2%).
 
 ---
 
+## Backtesting — test parameters before running them
+
+The **Backtest** button (Control card) replays the last N days of real
+Binance candles through **the exact same strategy code the live bot runs**,
+with your current parameters. No orders are placed and no keys are needed;
+results print to the console:
+
+- per-strategy PnL (realized / unrealized at the final price / fees),
+  fill counts and volumes
+- a **buy & hold comparison** — did the strategy beat just holding?
+- simulation stats (placements, cancels, fills over how many candles)
+
+CLI: `py bot\backtest.py --strategies grid --days 7` (plus any strategy
+flags; `--candles 1m` for finer fills, `--fee 0%` to match demo's zero fees —
+the default 0.1% per fill matches live Binance spot and is deliberately
+harsher).
+
+**Honest limits:** fills are simulated from candle highs/lows — a resting
+buy "fills" if a later candle's low touches it, at the order's own price.
+That ignores order-book queues and depth, so results are **directional, not
+exact**; a strategy that loses in backtest will very likely lose live, but a
+small backtest profit is not a guarantee. The repo also keeps hummingbot's
+own engine-based backtests in `poc/backtest_strategies.py` (runs the actual
+hummingbot controllers inside the Docker image) if you want a second opinion
+from the framework itself.
+
 ## Reading the PnL
 
 - **Realized** — profit locked in by completed sells (the money is banked).

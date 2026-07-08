@@ -36,6 +36,7 @@ bare-features/
 │   ├── bot.py                   # all three strategies live on Binance Spot Demo Mode
 │   ├── binance_client.py        # REST client + request/rate-limit accounting
 │   ├── strategies.py            # live grid_strike / pmm_simple / supertrend_v1
+│   ├── backtest.py              # replay real candles through the live strategy code
 │   ├── gui.py                   # simple tkinter form UI for Grid Strike
 │   ├── launcher.py              # XAMPP-style control panel (web UI + bot API services)
 │   ├── api_server.py            # bot backend API (port 8801)
