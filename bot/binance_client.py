@@ -16,8 +16,7 @@ import urllib.request
 from collections import defaultdict
 
 BASES = {
-    "testnet": "https://testnet.binance.vision",   # standalone spot testnet (API-only)
-    "demo": "https://demo-api.binance.com",        # binance.com Demo Mode — has a web
+    "demo": "https://demo-api.binance.com",        # binance.com Demo Mode — web
                                                    # trading UI at demo.binance.com
     "live": "https://api.binance.com",
 }
@@ -117,7 +116,7 @@ class RequestMeter:
 
 
 class BinanceClient:
-    def __init__(self, mode="testnet", api_key=None, api_secret=None, meter=None):
+    def __init__(self, mode="demo", api_key=None, api_secret=None, meter=None):
         self.base = BASES[mode]
         self.mode = mode
         self.api_key = api_key

@@ -1,15 +1,16 @@
 """
-bare-features trading bot — grid_strike + pmm_simple + supertrend_v1 on the
-Binance Spot Testnet, with request accounting. See docs/trading-bot.md.
+bare-features trading bot — grid_strike + pmm_simple + supertrend_v1 on
+Binance Spot Demo Mode, with request accounting. See docs/trading-bot.md.
 
 Usage (host, pure stdlib):
   py bare-features\\bot\\bot.py --check              # connection + request cost check
   py bare-features\\bot\\bot.py --duration 120       # dry-run loop (no keys needed)
-  py bare-features\\bot\\bot.py --trade              # trade on testnet (keys required)
+  py bare-features\\bot\\bot.py --trade              # trade on demo (keys required)
 
-Keys: BINANCE_API_KEY / BINANCE_API_SECRET env vars, or --credentials-account
-with CONFIG_PASSWORD set (reads the encrypted bare-features credential store).
-Trading is refused outside testnet.
+Keys: BINANCE_API_KEY / BINANCE_API_SECRET env vars (create in API Management
+while in Demo Trading on binance.com), or --credentials-account with
+CONFIG_PASSWORD set. Trading is refused outside Demo Mode; watch the bot's
+orders live at https://demo.binance.com.
 """
 import argparse
 import os
@@ -173,7 +174,8 @@ def connection_check(client, args):
         print(f"[5] exchange-validated test order (POST /api/v3/order/test): {verdict}")
     else:
         print("[4] no API keys — auth + test-order steps skipped")
-        print("    get free testnet keys: https://testnet.binance.vision (GitHub login)")
+        print("    get demo keys: log into binance.com, switch to Demo Trading, "
+              "create a key in API Management")
 
     print()
     print(client.meter.report(weight_limit_from(rate_limits)))
@@ -467,15 +469,14 @@ class BotRunner:
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", choices=["testnet", "demo", "live"], default="testnet",
-                   help="testnet = testnet.binance.vision; demo = binance.com Demo "
-                        "Mode (watch orders live at demo.binance.com); live = "
-                        "read-only --check only")
+    p.add_argument("--mode", choices=["demo", "live"], default="demo",
+                   help="demo = binance.com Demo Mode (watch orders live at "
+                        "demo.binance.com); live = read-only --check only")
     p.add_argument("--symbol", default="BTCUSDT")
     p.add_argument("--check", action="store_true",
                    help="connection + request-cost check, then exit")
     p.add_argument("--trade", action="store_true",
-                   help="actually place orders (testnet only; default is dry-run)")
+                   help="actually place orders (demo account only; default is dry-run)")
     p.add_argument("--strategies", default="grid,pmm,supertrend",
                    help="comma list: grid,pmm,supertrend")
     p.add_argument("--interval", type=float, default=10, help="tick seconds")
@@ -532,11 +533,11 @@ def main():
 
     if args.mode == "live":
         sys.exit("refusing to run the trading loop against live Binance — "
-                 "use --mode testnet (live is allowed only with --check)")
+                 "use --mode demo (live is allowed only with --check)")
     if args.trade and not client.can_sign:
         sys.exit("--trade needs API keys: set BINANCE_API_KEY/BINANCE_API_SECRET "
-                 "(free keys at https://testnet.binance.vision) or use "
-                 "--credentials-account")
+                 "(create a key in API Management while in Demo Trading on "
+                 "binance.com) or use --credentials-account")
     if not args.trade:
         client.api_key = client.api_secret = None       # force dry-run
     elif source:

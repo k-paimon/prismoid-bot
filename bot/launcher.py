@@ -144,7 +144,7 @@ def run_gui():
 
     outer = ttk.Frame(root, padding=12)
     outer.pack(fill="both", expand=True)
-    ttk.Label(outer, text="Grid Strike Bot - Binance Testnet",
+    ttk.Label(outer, text="Grid Strike Bot - Binance Demo",
               font=("", 12, "bold")).pack(anchor="w")
     ttk.Label(outer, foreground="gray",
               text="start both services, then use the dashboard in your browser"
@@ -170,6 +170,8 @@ def run_gui():
         light.grid(row=row_index, column=3, padx=6)
 
         def toggle():
+            # immediate feedback: dim the button until the health poll confirms
+            toggle_btn.configure(text="...", state="disabled")
             if svc.running:
                 svc.stop(log)
             else:
@@ -232,7 +234,11 @@ def run_gui():
             color = "#2e9e5b" if healthy else ("#e0a03c" if running else "#b0b0b0")
             widgets["light"].itemconfigure(widgets["dot"], fill=color)
             widgets["pid"].configure(text=str(svc.proc.pid) if running else "-")
-            widgets["toggle"].configure(text="Stop" if running else "Start")
+            if running and healthy:
+                widgets["toggle"].configure(text="Stop", state="normal")
+            elif not running:
+                widgets["toggle"].configure(text="Start", state="normal")
+            # else: mid-transition — leave the "..." from the click in place
             if widgets["open"]:
                 widgets["open"].configure(state="normal" if healthy else "disabled")
         web = next(s for s in services if s.key == "web")

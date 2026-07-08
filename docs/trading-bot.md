@@ -1,7 +1,7 @@
-# bare-features trading bot — grid_strike + pmm_simple + supertrend_v1 on Binance Spot Testnet
+# bare-features trading bot — grid_strike + pmm_simple + supertrend_v1 on Binance Spot Demo Mode
 
 A standalone trading bot that runs live versions of the three proof-of-concept
-strategies against the **Binance Spot Testnet** (`https://testnet.binance.vision`),
+strategies against **Binance Spot Demo Mode** (`https://demo-api.binance.com`),
 with first-class **request accounting**: every REST call is counted, weighted, and
 reconciled against the rate-limit headers Binance returns. Because this is a
 market-making bot, staying inside the exchange's request budget is as much a part
@@ -28,7 +28,7 @@ bare-features/
 
 ## 1. Goal
 
-1. Prove the connection to Binance's demo (testnet) API: authentication,
+1. Prove the connection to Binance's demo API: authentication,
    latency, and exchange-side order validation.
 2. Run the three strategies from `strategies/controllers/` as a live bot,
    simplified but parameter-compatible with the hummingbot controllers.
@@ -38,21 +38,16 @@ bare-features/
 
 ## 2. Exchange environment
 
-Two demo venues are supported (`--mode` / the dashboard's Venue selector);
-both use identical spot API semantics:
+| | Binance Spot Demo Mode |
+| --- | --- |
+| Base URL | `https://demo-api.binance.com` |
+| Keys | your regular Binance account → switch to Demo Trading → create a key in API Management |
+| Web UI to watch orders | **<https://demo.binance.com>** — the full spot trading UI; the bot's resting orders and fills appear there live |
+| Market data | mirrors the live exchange |
+| Funds | simulated, resettable from the demo UI |
 
-| | Spot Testnet | Demo Mode |
-| --- | --- | --- |
-| Base URL | `https://testnet.binance.vision` | `https://demo-api.binance.com` |
-| Keys | free, GitHub login at <https://testnet.binance.vision> | your regular Binance account → switch to Demo Trading → API Management |
-| Web UI to watch orders | **none** (API-only) | **yes — <https://demo.binance.com>**, full spot trading UI |
-| Market data | independent of live | mirrors the live exchange |
-| Funds | auto-granted, wiped monthly | simulated, resettable from the UI |
-
-Demo Mode is the better "proof it works" venue: the bot's resting orders and
-fills are visible in a real Binance trading interface tied to your own
-account. `--mode live` is allowed **only** for the read-only connection
-check — the bot refuses to trade against `api.binance.com`.
+`--mode live` is allowed **only** for the read-only connection check — the
+bot refuses to trade against `api.binance.com`.
 
 Keys are read from `BINANCE_API_KEY` / `BINANCE_API_SECRET` env vars, or from the
 encrypted credential store (`poc/store_binance_keys.py` writes it,
@@ -178,13 +173,13 @@ orders it did not place.
 # 1. Connection check (works keyless; with keys also validates auth + a test order)
 py bare-features\bot\bot.py --check
 
-# 2. Get testnet keys (github login) then:
+# 2. Get demo keys (binance.com > Demo Trading > API Management) then:
 $env:BINANCE_API_KEY='...'; $env:BINANCE_API_SECRET='...'
 
 # 3. Dry-run the loop for 2 minutes (no keys needed — prints intended actions):
 py bare-features\bot\bot.py --duration 120
 
-# 4. Trade on the testnet (all three strategies, 10s tick, until Ctrl+C):
+# 4. Trade on the demo account (all three strategies, 10s tick, until Ctrl+C):
 py bare-features\bot\bot.py --trade
 
 # useful flags

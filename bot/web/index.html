@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grid Strike Bot - Binance Testnet</title>
+<title>Grid Strike Bot - Binance Demo</title>
 <style>
   :root {
     --bg: #f4f6f8; --card: #ffffff; --ink: #1c2733; --muted: #6b7a8c;
@@ -50,11 +50,31 @@
   button {
     font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 6px;
     border: 1px solid var(--line); background: var(--card); color: var(--ink);
-    cursor: pointer; margin: 10px 6px 0 0;
+    cursor: pointer; margin: 10px 6px 0 0; position: relative;
+    transition: transform .08s ease, box-shadow .15s ease, opacity .15s ease;
   }
+  button:hover:not(:disabled) { box-shadow: 0 1px 4px rgba(20,40,60,.18); }
+  button:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.danger  { background: var(--danger); border-color: var(--danger); color: #fff; }
   button:disabled { opacity: .45; cursor: default; }
+  button.loading { color: transparent !important; pointer-events: none; opacity: 1; }
+  button.loading::after {
+    content: ""; position: absolute; inset: 0; margin: auto;
+    width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid rgba(120,135,150,.35); border-top-color: #566575;
+    animation: spin .6s linear infinite;
+  }
+  button.primary.loading::after, button.danger.loading::after {
+    border-color: rgba(255,255,255,.35); border-top-color: #fff;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  input[type=text]:focus, input[type=password]:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(11,110,79,.15);
+  }
+  .card { box-shadow: 0 1px 3px rgba(20,40,60,.06); }
+  .badge { transition: background .25s ease, color .25s ease; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
   .hint a { color: inherit; }
   #console {
@@ -79,7 +99,9 @@
 </head>
 <body>
 <header>
-  <h1>Grid Strike Bot &mdash; Binance Spot Testnet</h1>
+  <h1>Grid Strike Bot &mdash; Binance Spot Demo</h1>
+  <a class="hint" href="https://demo.binance.com" target="_blank"
+     style="text-decoration:none">watch on demo.binance.com &nearr;</a>
   <span id="apiBadge" class="badge">API: checking...</span>
   <span id="botBadge" class="badge">bot: idle</span>
   <span id="uptime" class="badge" style="display:none"></span>
@@ -88,27 +110,20 @@
 <main>
 <div>
   <div class="card">
-    <h2>Credentials</h2>
+    <h2>Demo account credentials</h2>
     <label>API key <input type="text" id="apiKey" autocomplete="off"></label>
     <label>API secret <input type="password" id="apiSecret" autocomplete="off"></label>
     <button id="saveCreds">Save credentials</button>
     <button id="clearCreds">Clear</button>
     <div class="hint" id="credsState">no credentials saved</div>
-    <div class="hint">Testnet keys:
-      <a href="https://testnet.binance.vision" target="_blank">testnet.binance.vision</a>
-      (GitHub login). Demo Mode keys: log into Binance, switch to
+    <div class="hint">Log into Binance, switch to
       <a href="https://demo.binance.com" target="_blank">Demo Trading</a>, then
-      create a key in API Management. Held in the API process memory only.</div>
+      create a key in API Management. Keys are held in memory only &mdash;
+      never written to disk.</div>
   </div>
 
   <div class="card">
     <h2>Parameters</h2>
-    <label>Venue
-      <select id="venue">
-        <option value="testnet">Spot Testnet (API-only, keys: testnet.binance.vision)</option>
-        <option value="demo">Demo Mode (watch orders at demo.binance.com)</option>
-      </select>
-    </label>
     <label>Trading pair <input type="text" id="symbol" value="BTCUSDT"></label>
     <div class="row2">
       <label>Grid start price <input type="text" id="grid_start" placeholder="-3% or price"></label>
@@ -132,7 +147,7 @@
       <label><input type="checkbox" id="st_supertrend"> supertrend</label>
     </div>
     <div class="checks">
-      <label><input type="checkbox" id="trade"> place real testnet orders (off = dry-run)</label>
+      <label><input type="checkbox" id="trade"> place real orders on your demo account (off = dry-run)</label>
     </div>
     <div class="warn" id="tradeWarn">Real orders need saved credentials.</div>
   </div>
@@ -175,7 +190,7 @@
 <script>
 const API = `http://${location.hostname}:8801`;
 const $ = id => document.getElementById(id);
-const PARAM_IDS = ["venue","symbol","grid_start","grid_end","grid_limit","grid_levels",
+const PARAM_IDS = ["symbol","grid_start","grid_end","grid_limit","grid_levels",
                    "grid_max_open","total_quote","interval","duration"];
 let logCursor = 0, apiUp = false, botRunning = false;
 
@@ -201,9 +216,12 @@ function setBadges() {
   a.className = "badge " + (apiUp ? "on" : "err");
   b.textContent = "bot: " + (botRunning ? window._mode || "running" : "idle");
   b.className = "badge " + (botRunning ? "on" : "");
-  $("startBtn").disabled = !apiUp || botRunning;
-  $("checkBtn").disabled = !apiUp || botRunning;
-  $("stopBtn").disabled  = !apiUp || !botRunning;
+  for (const [id, off] of [["startBtn", () => !apiUp || botRunning],
+                           ["checkBtn", () => !apiUp || botRunning],
+                           ["stopBtn",  () => !apiUp || !botRunning]]) {
+    const btn = $(id);
+    if (!btn.classList.contains("loading")) btn.disabled = off();
+  }
 }
 
 async function pollStatus() {
@@ -254,24 +272,50 @@ async function post(path, body) {
   return r;
 }
 
-$("saveCreds").onclick = async () => {
+// buttons show a spinner until the action has actually taken effect
+async function withLoading(btn, fn) {
+  if (btn.classList.contains("loading")) return;
+  btn.classList.add("loading");
+  btn.disabled = true;
+  try { await fn(); } catch (e) {}
+  btn.classList.remove("loading");
+  setBadges();          // restore enabled/disabled from real state
+}
+async function waitUntil(cond, timeoutMs) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    await pollStatus();
+    if (cond()) return true;
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return false;
+}
+
+$("saveCreds").onclick = () => withLoading($("saveCreds"), async () => {
   await post("/api/credentials",
              {api_key: $("apiKey").value, api_secret: $("apiSecret").value});
   $("apiSecret").value = "";
-  pollStatus();
-};
-$("clearCreds").onclick = async () => {
+  await pollStatus();
+});
+$("clearCreds").onclick = () => withLoading($("clearCreds"), async () => {
   await fetch(API + "/api/credentials", {method: "DELETE"});
-  pollStatus();
-};
-$("checkBtn").onclick = () => { persist(); post("/api/check", gatherParams()); };
-$("startBtn").onclick = () => {
+  await pollStatus();
+});
+$("checkBtn").onclick = () => withLoading($("checkBtn"), async () => {
   persist();
-  const p = gatherParams();
-  if (p.trade) { /* server enforces credentials; warn early too */ }
-  post("/api/start", p);
-};
-$("stopBtn").onclick = () => post("/api/stop");
+  const r = await post("/api/check", gatherParams());
+  if (r.ok) await waitUntil(() => botRunning, 4000);   // check has started
+});
+$("startBtn").onclick = () => withLoading($("startBtn"), async () => {
+  persist();
+  const r = await post("/api/start", gatherParams());
+  if (r.ok) await waitUntil(() => botRunning, 8000);   // spinner until it's live
+});
+$("stopBtn").onclick = () => withLoading($("stopBtn"), async () => {
+  const r = await post("/api/stop");
+  // bot cancels its open orders before exiting — hold the spinner until done
+  if (r.ok) await waitUntil(() => !botRunning, 25000);
+});
 $("trade").onchange = async () => {
   const s = apiUp ? await api("/api/status") : {credentials_set: false};
   $("tradeWarn").style.display =
@@ -288,8 +332,7 @@ async function refreshExchange() {
   if (!apiUp) return;
   try {
     const sym = $("symbol").value.trim().toUpperCase() || "BTCUSDT";
-    const d = await api(`/api/exchange?symbol=${encodeURIComponent(sym)}`
-                        + `&venue=${encodeURIComponent($("venue").value)}`);
+    const d = await api(`/api/exchange?symbol=${encodeURIComponent(sym)}`);
     if (d.error) { $("exBalances").textContent = d.error; return; }
     $("exBalances").textContent = "Balances: " + (d.balances || [])
       .map(b => `${b.asset} ${(+b.free).toFixed(5)}${+b.locked ? ` (+${(+b.locked).toFixed(5)} in orders)` : ""}`)
@@ -307,7 +350,7 @@ async function refreshExchange() {
       || "<tr><td class='hint'>no trades yet</td></tr>";
   } catch (e) {}
 }
-$("exchangeRefresh").onclick = refreshExchange;
+$("exchangeRefresh").onclick = () => withLoading($("exchangeRefresh"), refreshExchange);
 
 setInterval(pollStatus, 1500);
 setInterval(pollLogs, 1000);

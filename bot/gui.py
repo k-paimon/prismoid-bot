@@ -1,6 +1,6 @@
 """
 Native desktop UI (tkinter — ships with Python on Windows and macOS) for running
-the Grid Strike strategy on the Binance Spot Testnet.
+the Grid Strike strategy on Binance Spot Demo Mode.
 
   py bare-features\\bot\\gui.py          (Windows)
   python3 bare-features/bot/gui.py       (macOS)
@@ -43,7 +43,7 @@ class GridStrikeGUI:
         self.root = root
         self.proc = None
         self.log_queue = queue.Queue()
-        root.title("Grid Strike - Binance Testnet")
+        root.title("Grid Strike - Binance Demo")
         root.minsize(760, 560)
 
         outer = ttk.Frame(root, padding=10)
@@ -52,7 +52,7 @@ class GridStrikeGUI:
         left.pack(side="left", fill="y", padx=(0, 10))
 
         # ----------------------------------------------------- credentials
-        creds = ttk.LabelFrame(left, text=" Binance Testnet credentials ", padding=8)
+        creds = ttk.LabelFrame(left, text=" Binance Demo credentials ", padding=8)
         creds.pack(fill="x")
         ttk.Label(creds, text="API key").grid(row=0, column=0, sticky="w")
         self.api_key = ttk.Entry(creds, width=34)
@@ -61,7 +61,7 @@ class GridStrikeGUI:
         self.api_secret = ttk.Entry(creds, width=34, show="*")
         self.api_secret.grid(row=1, column=1, pady=2)
         ttk.Label(creds, foreground="gray",
-                  text="free keys: testnet.binance.vision (GitHub login)\n"
+                  text="keys: binance.com > Demo Trading > API Management\n"
                        "keys are kept in memory only, never saved").grid(
             row=2, column=0, columnspan=2, sticky="w")
 
@@ -81,7 +81,7 @@ class GridStrikeGUI:
         self.trade_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             params, variable=self.trade_var,
-            text="Place real testnet orders (off = dry-run, prints actions only)",
+            text="Place real demo orders (off = dry-run, prints actions only)",
         ).grid(row=len(PARAM_FIELDS), column=0, columnspan=3, sticky="w", pady=(6, 0))
 
         # --------------------------------------------------------- buttons
@@ -236,8 +236,8 @@ class GridStrikeGUI:
             if not (self.api_key.get().strip() and self.api_secret.get().strip()):
                 messagebox.showerror(
                     "Missing credentials",
-                    "Real testnet orders need an API key and secret.\n"
-                    "Get free ones at testnet.binance.vision (GitHub login).")
+                    "Real demo orders need an API key and secret.\n"
+                    "Create one in API Management while in Demo Trading.")
                 return
             cmd.append("--trade")
         self.launch(cmd, "bot running (trading)" if self.trade_var.get()

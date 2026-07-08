@@ -32,8 +32,8 @@ bare-features/
 │   ├── exchange_test_trade.py   # strategy-derived orders -> Binance /api/v3/order/test
 │   ├── store_binance_keys.py    # save API keys into the encrypted credential store
 │   └── results/                 # per-strategy backtest output (JSON)
-├── bot/                     # standalone testnet trading bot (pure stdlib, runs with `py`)
-│   ├── bot.py                   # all three strategies live on Binance Spot Testnet
+├── bot/                     # standalone demo trading bot (pure stdlib, runs with `py`)
+│   ├── bot.py                   # all three strategies live on Binance Spot Demo Mode
 │   ├── binance_client.py        # REST client + request/rate-limit accounting
 │   ├── strategies.py            # live grid_strike / pmm_simple / supertrend_v1
 │   ├── gui.py                   # simple tkinter form UI for Grid Strike

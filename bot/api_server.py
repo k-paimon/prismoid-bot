@@ -101,17 +101,15 @@ class BotManager:
         with self.lock:
             self.api_key, self.api_secret = key or None, secret or None
 
-    def exchange_summary(self, symbol, venue="testnet"):
+    def exchange_summary(self, symbol):
         """Live proof from Binance itself: balances, resting orders, and
         executed trades queried straight from the exchange (not our records)."""
         with self.lock:
             key, secret = self.api_key, self.api_secret
         if not (key and secret):
             return {"error": "no credentials saved"}
-        if venue not in ("testnet", "demo"):
-            venue = "testnet"
-        client = BinanceClient(venue, key, secret)
-        out = {"symbol": symbol, "venue": venue}
+        client = BinanceClient("demo", key, secret)
+        out = {"symbol": symbol}
         acct = client.account()
         if acct["status"] == 200:
             out["balances"] = [b for b in acct["body"].get("balances", [])
@@ -163,10 +161,7 @@ class BotManager:
             if self.proc is not None and self.proc.poll() is None:
                 return False, "bot is already running - stop it first"
             symbol = (params.get("symbol") or "BTCUSDT").strip().upper()
-            venue = (params.get("venue") or "testnet").strip().lower()
-            if venue not in ("testnet", "demo"):
-                return False, f"invalid venue {venue!r} (use testnet or demo)"
-            cmd = bot_cmd_prefix() + ["--symbol", symbol, "--mode", venue]
+            cmd = bot_cmd_prefix() + ["--symbol", symbol]
             if check:
                 cmd.append("--check")
                 self.mode = "check"
@@ -188,8 +183,9 @@ class BotManager:
                                            f"or a percent like -3%: {value!r}")
                 if params.get("trade"):
                     if not (self.api_key and self.api_secret):
-                        return False, ("trading needs credentials - save an API "
-                                       "key/secret first (testnet.binance.vision)")
+                        return False, ("trading needs credentials - create a key in "
+                                       "API Management while in Demo Trading on "
+                                       "binance.com, then save it here")
                     cmd.append("--trade")
                     self.mode = "trading"
                 else:
@@ -302,8 +298,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/exchange":
             qs = urllib.parse.parse_qs(parsed.query)
             symbol = (qs.get("symbol", ["BTCUSDT"])[0] or "BTCUSDT").upper()
-            venue = (qs.get("venue", ["testnet"])[0] or "testnet").lower()
-            self._send(200, MANAGER.exchange_summary(symbol, venue))
+            self._send(200, MANAGER.exchange_summary(symbol))
         else:
             self._send(404, {"error": "not found"})
 
