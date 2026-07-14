@@ -28,8 +28,12 @@ class SupabaseError(Exception):
 
 class Supabase:
     def __init__(self, url=None, key=None, timeout=15):
-        self.url = (url or os.environ.get("SUPABASE_URL", "")).rstrip("/")
-        self.key = key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        # strip whitespace and BOMs that env tooling can smuggle in
+        junk = "\ufeff \t\r\n"
+        self.url = (url or os.environ.get("SUPABASE_URL", "")) \
+            .strip(junk).rstrip("/")
+        self.key = (key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")) \
+            .strip(junk)
         self.timeout = timeout
         if not (self.url and self.key):
             raise SupabaseError(0, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
