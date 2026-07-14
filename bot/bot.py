@@ -1,16 +1,23 @@
 """
 bare-features trading bot — grid_strike + pmm_simple + supertrend_v1 on
-Binance Spot Demo Mode, with request accounting. See docs/trading-bot.md.
+Binance Spot Demo Mode or Gate.com Spot, with request accounting.
+See docs/trading-bot.md.
 
 Usage (host, pure stdlib):
   py bare-features\\bot\\bot.py --check              # connection + request cost check
   py bare-features\\bot\\bot.py --duration 120       # dry-run loop (no keys needed)
   py bare-features\\bot\\bot.py --trade              # trade on demo (keys required)
+  py bare-features\\bot\\bot.py --exchange gate --check   # same checks on Gate.com
 
-Keys: BINANCE_API_KEY / BINANCE_API_SECRET env vars (create in API Management
-while in Demo Trading on binance.com), or --credentials-account with
-CONFIG_PASSWORD set. Trading is refused outside Demo Mode; watch the bot's
-orders live at https://demo.binance.com.
+Binance keys: BINANCE_API_KEY / BINANCE_API_SECRET env vars (create in API
+Management while in Demo Trading on binance.com), or --credentials-account
+with CONFIG_PASSWORD set. Binance trading is refused outside Demo Mode; watch
+the bot's orders live at https://demo.binance.com.
+
+Gate.com keys: GATE_API_KEY / GATE_API_SECRET, created in Gate's TESTNET API
+Key Management (spot trade permission). Trading runs on the Gate testnet
+(https://api-testnet.gateapi.io) — watch orders at https://testnet.gate.com.
+The live Gate API is allowed only for the read-only --check, same as Binance.
 """
 import argparse
 import json
@@ -23,7 +30,8 @@ from decimal import Decimal, ROUND_DOWN, ROUND_UP
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from binance_client import BinanceClient, IPBanError, RequestMeter, WEIGHTS  # noqa: E402
-from strategies import (CjCompound, EntryFilter, GridStrike, MarketState,  # noqa: E402
+from gate_client import GateClient, GateFuturesClient  # noqa: E402
+from strategies import (GridStrike, MarketState,  # noqa: E402
                         PMMSimple, Supertrend, round_to)
 
 MAX_PLACEMENTS_PER_TICK = 8     # keep well inside the 50-orders/10s bucket
@@ -32,6 +40,12 @@ MAX_PLACEMENTS_PER_TICK = 8     # keep well inside the 50-orders/10s bucket
 # ------------------------------------------------------------------ key setup
 
 def load_keys(args):
+    if args.exchange.startswith("gate"):
+        key = os.environ.get("GATE_API_KEY")
+        secret = os.environ.get("GATE_API_SECRET")
+        if key and secret:
+            return key, secret, "environment variables (GATE_API_KEY)"
+        return None, None, None
     key = os.environ.get("BINANCE_API_KEY")
     secret = os.environ.get("BINANCE_API_SECRET")
     if key and secret:
@@ -70,7 +84,10 @@ def get_filters(client, symbol):
 
 class PnLTracker:
     """Average-cost PnL over the bot's own fills, in the quote currency.
-    realized = closed round trips; unrealized = open inventory marked to mid."""
+    Position is SIGNED: positive = long inventory, negative = short (a sell
+    while flat opens a short — first-class on futures, and on spot it still
+    means "must buy back cheaper to profit", not instant revenue).
+    realized = closed round trips; unrealized = open position marked to mid."""
 
     def __init__(self):
         self.position = Decimal("0")
@@ -89,20 +106,32 @@ class PnLTracker:
         price = quote_amount / qty
         self.fees += Decimal(fee_quote)
         if side == "BUY":
-            self.avg_cost = ((self.avg_cost * self.position + quote_amount)
-                             / (self.position + qty))
-            self.position += qty
             self.buy_volume += quote_amount
             self.buys += 1
         else:
-            self.realized += (price - self.avg_cost) * qty
-            self.position = max(Decimal("0"), self.position - qty)
-            if self.position == 0:
-                self.avg_cost = Decimal("0")
             self.sell_volume += quote_amount
             self.sells += 1
+        signed = qty if side == "BUY" else -qty
+        if self.position * signed >= 0:
+            # extending (or opening) the position: blend the cost basis
+            total = abs(self.position) + qty
+            self.avg_cost = (self.avg_cost * abs(self.position)
+                             + quote_amount) / total
+            self.position += signed
+            return
+        # reducing, closing, or flipping the position
+        close_qty = min(qty, abs(self.position))
+        direction = 1 if self.position > 0 else -1      # +1 = closing a long
+        self.realized += (price - self.avg_cost) * close_qty * direction
+        self.position += signed
+        if self.position == 0:
+            self.avg_cost = Decimal("0")
+        elif self.position * direction < 0:
+            # flipped through flat: the remainder opens fresh at this price
+            self.avg_cost = price
 
     def unrealized(self, mid):
+        # signed position makes this hold for shorts too (mid < avg = profit)
         return (mid - self.avg_cost) * self.position if mid else Decimal("0")
 
     def summary_line(self, mid, base="base"):
@@ -113,13 +142,14 @@ class PnLTracker:
                 f"{self.buys} buys {self.buy_volume:.2f}, "
                 f"{self.sells} sells {self.sell_volume:.2f}")
         if self.position:
-            shown = self.position.quantize(Decimal("0.00000001")).normalize()
-            line += f", holding {shown:f} {base} bought @ avg {self.avg_cost:.2f}"
+            shown = abs(self.position).quantize(Decimal("0.00000001")).normalize()
+            stance = "holding" if self.position > 0 else "short"
+            line += f", {stance} {shown:f} {base} @ avg {self.avg_cost:.2f}"
         return line
 
 
 STRATEGY_NAMES = {"GS": "grid_strike", "PMM": "pmm_simple",
-                  "ST": "supertrend_v1", "CJ": "cj_compound"}
+                  "ST": "supertrend_v1"}
 
 
 def weight_limit_from(rate_limits):
@@ -132,7 +162,7 @@ def weight_limit_from(rate_limits):
 # ------------------------------------------------------------ connection check
 
 def connection_check(client, args):
-    print(f"CONNECTION CHECK — Binance Spot {client.mode.upper()} ({client.base})\n")
+    print(f"CONNECTION CHECK — {client.label} ({client.base})\n")
 
     rtts = []
     for _ in range(3):
@@ -171,11 +201,17 @@ def connection_check(client, args):
                               timeInForce="GTC", quantity=f"{qty.normalize():f}",
                               price=f"{price.normalize():f}")
         verdict = "PASSED" if r["status"] == 200 else f"REJECTED {r['body']}"
-        print(f"[5] exchange-validated test order (POST /api/v3/order/test): {verdict}")
+        note = r["body"].get("msg") if r["status"] == 200 else None
+        print(f"[5] validated test order: {verdict}"
+              + (f" ({note})" if note else ""))
     else:
         print("[4] no API keys — auth + test-order steps skipped")
-        print("    get demo keys: log into binance.com, switch to Demo Trading, "
-              "create a key in API Management")
+        if args.exchange.startswith("gate"):
+            print("    get keys: Testnet API Key Management on gate.com (spot/"
+                  "futures trade permission), then set GATE_API_KEY / GATE_API_SECRET")
+        else:
+            print("    get demo keys: log into binance.com, switch to Demo Trading, "
+                  "create a key in API Management")
 
     print()
     print(client.meter.report(weight_limit_from(rate_limits)))
@@ -184,12 +220,16 @@ def connection_check(client, args):
 # ----------------------------------------------------------------- the runner
 
 class BotRunner:
-    def __init__(self, client, symbol, strategies, interval, keep_orders=False):
+    def __init__(self, client, symbol, strategies, interval, keep_orders=False,
+                 max_loss=None):
         self.client = client
         self.symbol = symbol
         self.strategies = strategies                       # prefix -> strategy
         self.interval = interval
         self.keep_orders = keep_orders
+        self.max_loss = max_loss        # kill switch: quote-units session loss
+        self.book_failures = 0          # consecutive stale-data ticks
+        self.halted = None              # reason string once a kill switch fires
         self.filters = None
         self.weight_limit = 6000
         self.tracked = {}       # clientOrderId -> {tag, status, placed_at}
@@ -307,7 +347,7 @@ class BotRunner:
                     body = r["body"]
                     print(f"    FILL [{self.name_of(info['tag'])}] {info['tag']} "
                           f"({body.get('executedQty')} @ {body.get('price')}, "
-                          f"binance orderId {body.get('orderId')})")
+                          f"exchange orderId {body.get('orderId')})")
                     self.pnl_for(info["tag"]).on_fill(
                         body.get("side"),
                         Decimal(body.get("executedQty", "0")),
@@ -346,7 +386,7 @@ class BotRunner:
                           Decimal("0"))
                 print(f"    FILL [{self.name_of(order['tag'])}] {order['tag']} "
                       f"(market, {body.get('executedQty')}, "
-                      f"binance orderId {body.get('orderId')})")
+                      f"exchange orderId {body.get('orderId')})")
                 self.pnl_for(order["tag"]).on_fill(
                     body.get("side"), Decimal(body.get("executedQty", "0")),
                     Decimal(body.get("cummulativeQuoteQty", "0")), fee)
@@ -358,7 +398,7 @@ class BotRunner:
                       f"{params['side']} "
                       f"{params.get('quantity', params.get('quoteOrderQty'))} "
                       f"@ {params.get('price', 'MKT')} "
-                      f"(binance orderId {body.get('orderId')})")
+                      f"(exchange orderId {body.get('orderId')})")
         else:
             self.rejections += 1
             print(f"    REJECTED [{self.name_of(order['tag'])}] {order['tag']}: "
@@ -386,9 +426,22 @@ class BotRunner:
         book = self.client.book_ticker(self.symbol)
         if book["status"] != 200:
             print(f"    bookTicker failed: {book['body']}")
+            # stale-data kill switch: never leave quotes resting on prices
+            # we can no longer see (the classic market-maker blow-up)
+            self.book_failures += 1
+            if self.book_failures >= 5:
+                self.halted = (f"market data stale for {self.book_failures} "
+                               f"consecutive ticks")
             return
+        self.book_failures = 0
         bid, ask = Decimal(book["body"]["bidPrice"]), Decimal(book["body"]["askPrice"])
         mid = (bid + ask) / 2
+        # microprice: imbalance-weighted fair value — a heavy bid queue and
+        # thin ask means the true price sits nearer the ask, and vice versa
+        bid_qty = Decimal(book["body"].get("bidQty", "0") or "0")
+        ask_qty = Decimal(book["body"].get("askQty", "0") or "0")
+        fair = ((bid * ask_qty + ask * bid_qty) / (bid_qty + ask_qty)
+                if bid_qty + ask_qty > 0 else mid)
 
         if time.time() - self.last_candles_fetch > 60:
             kl = self.client.klines(self.symbol, "3m", limit=100)
@@ -396,7 +449,8 @@ class BotRunner:
                 self.candles = kl["body"]
                 self.last_candles_fetch = time.time()
 
-        state = MarketState(mid, bid, ask, self.filters, candles=self.candles)
+        state = MarketState(mid, bid, ask, self.filters, candles=self.candles,
+                            fair=fair)
         open_by_tag = self.fetch_open_orders()
         if open_by_tag is None:
             return
@@ -436,6 +490,13 @@ class BotRunner:
             placed += 1
 
         self.last_mid = mid
+        # PnL kill switch: hard stop once the session loss exceeds the limit
+        if self.max_loss is not None:
+            realized, unreal, fees = self.pnl_totals(mid)
+            if realized + unreal - fees < -self.max_loss:
+                self.halted = (f"session loss "
+                               f"{realized + unreal - fees:+.2f} breached the "
+                               f"--max-loss limit of {self.max_loss}")
         st = self.strategies.get("ST")
         meter = self.client.meter
         print(f"[{time.strftime('%H:%M:%S')}] mid={mid.normalize():f} "
@@ -453,7 +514,7 @@ class BotRunner:
         self.filters, rate_limits = get_filters(self.client, self.symbol)
         self.weight_limit = weight_limit_from(rate_limits)
         mode = "DRY-RUN (no keys — signed calls printed, not sent)" if self.dry_run \
-            else f"TRADING on {self.client.mode}"
+            else f"TRADING on {self.client.label}"
         print(f"{mode} | {self.symbol} | strategies: "
               f"{', '.join(type(s).__name__ for s in self.strategies.values())} | "
               f"tick {self.interval}s"
@@ -471,6 +532,10 @@ class BotRunner:
                     raise
                 except Exception as e:
                     print(f"    tick error (continuing): {type(e).__name__}: {e}")
+                if self.halted:
+                    print(f"\nKILL SWITCH: {self.halted} — cancelling all "
+                          f"orders and stopping")
+                    break
                 sleep_left = self.interval - (time.time() - tick_start)
                 if deadline:
                     sleep_left = min(sleep_left, max(0, deadline - time.time()))
@@ -526,6 +591,15 @@ class BotRunner:
 
 def add_strategy_args(p):
     """Strategy flags shared by the live bot and the backtester."""
+    p.add_argument("--exchange", choices=["binance", "gate", "gate_futures"],
+                   default="binance",
+                   help="binance = Binance Spot Demo Mode; gate = Gate.com Spot "
+                        "testnet; gate_futures = Gate.com USDT-perp testnet "
+                        "(demo funds; watch at testnet.gate.com)")
+    p.add_argument("--leverage", type=int, default=1,
+                   help="gate_futures only: position leverage (default 1 = "
+                        "margin behaves like the spot budget; at Nx the "
+                        "liquidation distance shrinks to ~100%%/N)")
     p.add_argument("--symbol", default="BTCUSDT")
     p.add_argument("--strategies", default="grid,pmm,supertrend",
                    help="comma list: grid,pmm,supertrend")
@@ -549,6 +623,14 @@ def add_strategy_args(p):
                         "(e.g. 0.1%%,0.3%%,0.5%% places 3 bids + 3 asks)")
     p.add_argument("--pmm-refresh", type=float, default=60,
                    help="pmm_simple quote refresh time in seconds")
+    p.add_argument("--pmm-skew", type=Decimal, default=Decimal("0.5"),
+                   help="inventory skew intensity 0..1: how hard the quote "
+                        "center shades against the position (0 = classic "
+                        "symmetric quoting)")
+    p.add_argument("--pmm-max-inventory", default=None,
+                   help="hard position cap in quote units — the side that "
+                        "would grow the position past it stops quoting "
+                        "(default: --total-quote)")
     p.add_argument("--st-length", type=int, default=20,
                    help="supertrend ATR length (number of 3m candles)")
     p.add_argument("--st-multiplier", type=float, default=4.0,
@@ -556,22 +638,6 @@ def add_strategy_args(p):
     p.add_argument("--st-threshold", default="1%",
                    help="supertrend entry threshold: max distance from the trend "
                         "line, e.g. 1%% (or 0.01)")
-    p.add_argument("--cj-target", default="3%",
-                   help="cj_compound take-profit per trade, e.g. 3%%")
-    p.add_argument("--cj-stop", default=None,
-                   help="cj_compound stop loss, e.g. 1.5%% (default: none — "
-                        "hold until the target is reached)")
-    p.add_argument("--cj-cooldown", type=float, default=0,
-                   help="cj_compound seconds to stay flat between trades")
-    p.add_argument("--cj-entry", default="always", choices=EntryFilter.MODES,
-                   help="entry gate: always / trend (supertrend up) / fvg "
-                        "(price inside an unfilled bullish fair value gap) / "
-                        "trend+fvg")
-
-
-def _pct(tok):
-    tok = str(tok).strip()
-    return Decimal(tok[:-1]) / 100 if tok.endswith("%") else Decimal(tok)
 
 
 def build_strategies(args):
@@ -590,6 +656,10 @@ def build_strategies(args):
             if not tok:
                 continue
             value = Decimal(tok[:-1]) / 100 if tok.endswith("%") else Decimal(tok)
+            if not tok.endswith("%"):
+                print(f"NOTE: spread {tok!r} has no % sign, so it is a "
+                      f"FRACTION = {value * 100}% — write {tok}% if you "
+                      f"meant {tok} percent")
             if not Decimal("0") < value < Decimal("0.2"):
                 sys.exit(f"--pmm-spreads: {tok!r} is out of range — use percent "
                          f"values like 0.1% (fraction equivalents below 0.2)")
@@ -598,7 +668,9 @@ def build_strategies(args):
             sys.exit("--pmm-spreads: need at least one spread, e.g. 0.1%,0.3%")
         chosen["PMM"] = PMMSimple(buy_spreads=spreads, sell_spreads=spreads,
                                   total_amount_quote=args.total_quote,
-                                  executor_refresh_time=args.pmm_refresh)
+                                  executor_refresh_time=args.pmm_refresh,
+                                  skew=args.pmm_skew,
+                                  max_inventory_quote=args.pmm_max_inventory)
     if "supertrend" in wanted:
         tok = args.st_threshold.strip()
         threshold = float(tok[:-1]) / 100 if tok.endswith("%") else float(tok)
@@ -606,12 +678,6 @@ def build_strategies(args):
                                   multiplier=args.st_multiplier,
                                   percentage_threshold=threshold,
                                   order_amount_quote=args.total_quote)
-    if "cj" in wanted or "compound" in wanted:
-        chosen["CJ"] = CjCompound(target_pct=_pct(args.cj_target),
-                                  stop_pct=_pct(args.cj_stop) if args.cj_stop else None,
-                                  total_amount_quote=args.total_quote,
-                                  reentry_cooldown=args.cj_cooldown,
-                                  entry_filter=EntryFilter(args.cj_entry))
     return chosen
 
 
@@ -619,8 +685,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", choices=["demo", "live"], default="demo",
-                   help="demo = binance.com Demo Mode (watch orders live at "
-                        "demo.binance.com); live = read-only --check only")
+                   help="demo = the exchange's demo environment (Binance Demo "
+                        "Mode / Gate testnet); live = read-only --check only")
     p.add_argument("--check", action="store_true",
                    help="connection + request-cost check, then exit")
     p.add_argument("--trade", action="store_true",
@@ -630,6 +696,9 @@ def main():
                    help="stop after N seconds and print reports")
     p.add_argument("--keep-orders", action="store_true",
                    help="do not cancel open orders on exit")
+    p.add_argument("--max-loss", type=Decimal, default=None,
+                   help="kill switch: cancel everything and stop once the "
+                        "session PnL is below -N quote units (default: none)")
     p.add_argument("--credentials-account", default=None)
     p.add_argument("--credentials-base", default="bots")
     add_strategy_args(p)
@@ -656,7 +725,18 @@ def main():
 
     api_key, api_secret, source = load_keys(args)
     meter = RequestMeter()
-    client = BinanceClient(args.mode, api_key, api_secret, meter)
+    gate_mode = "testnet" if args.mode == "demo" else "live"
+    if args.exchange == "gate_futures":
+        if args.leverage > 1:
+            print(f"leverage {args.leverage}x: liquidation sits only "
+                  f"~{100 / args.leverage:.0f}% away from entry — one move "
+                  f"that size ends the position")
+        client = GateFuturesClient(gate_mode, api_key, api_secret, meter,
+                                   leverage=args.leverage)
+    elif args.exchange == "gate":
+        client = GateClient(gate_mode, api_key, api_secret, meter)
+    else:
+        client = BinanceClient(args.mode, api_key, api_secret, meter)
 
     if args.check:
         if source:
@@ -665,9 +745,14 @@ def main():
         return
 
     if args.mode == "live":
-        sys.exit("refusing to run the trading loop against live Binance — "
-                 "use --mode demo (live is allowed only with --check)")
+        sys.exit(f"refusing to run the trading loop against the live exchange — "
+                 f"use --mode demo ({'Gate testnet' if args.exchange.startswith('gate') else 'Binance Demo Mode'}; "
+                 f"live is allowed only with --check)")
     if args.trade and not client.can_sign:
+        if args.exchange.startswith("gate"):
+            sys.exit("--trade needs API keys: set GATE_API_KEY/GATE_API_SECRET "
+                     "(create a key with spot trade permission in Testnet API "
+                     "Key Management on gate.com)")
         sys.exit("--trade needs API keys: set BINANCE_API_KEY/BINANCE_API_SECRET "
                  "(create a key in API Management while in Demo Trading on "
                  "binance.com) or use --credentials-account")
@@ -681,7 +766,8 @@ def main():
         sys.exit(f"no valid strategies in '{args.strategies}'")
 
     BotRunner(client, args.symbol, chosen, args.interval,
-              keep_orders=args.keep_orders).run(args.duration, stop_event)
+              keep_orders=args.keep_orders,
+              max_loss=args.max_loss).run(args.duration, stop_event)
 
 
 if __name__ == "__main__":

@@ -9,9 +9,13 @@ Wraps bot.py as a small JSON HTTP API on http://localhost:8801:
   GET    /api/credentials  -> {set, api_key_masked}
   POST   /api/credentials  {api_key, api_secret}     (held in memory only)
   DELETE /api/credentials
-  POST   /api/check        {symbol}                  (connection + request-cost check)
-  POST   /api/start        {symbol, strategies, trade, grid_*, total_quote, ...}
+  POST   /api/check        {symbol, exchange}        (connection + request-cost check)
+  POST   /api/start        {symbol, exchange, strategies, trade, grid_*, ...}
   POST   /api/stop
+
+exchange is "binance" (Spot Demo Mode) or "gate" (Gate.com spot testnet —
+demo funds, watch at testnet.gate.com). Saved credentials are handed to the
+bot as BINANCE_* or GATE_* env vars to match the selected exchange.
 
 The bot itself runs as a bot.py subprocess (same graceful CTRL_BREAK/SIGINT
 stop as the launcher/GUI, so open orders are cancelled on stop) and its stdout
@@ -33,6 +37,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from binance_client import BinanceClient  # noqa: E402
+from gate_client import GateClient, GateFuturesClient  # noqa: E402
+
+VALID_EXCHANGES = {"binance", "gate", "gate_futures"}
 
 BOT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.py")
 DAILY_FILE = os.path.join(os.path.expanduser("~"), ".gridbot-daily.json")
@@ -66,29 +73,10 @@ def backtest_cmd_prefix():
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest.py")]
 
 
-def futures_cmd_prefix():
-    override = os.environ.get("GRIDBOT_FUTURES_CMD")
-    if override:
-        try:
-            return json.loads(override)
-        except ValueError:
-            pass
-    if getattr(sys, "frozen", False):
-        return [sys.executable, "--service", "futures"]
-    return [sys.executable, "-u",
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "futures.py")]
-
 def price_spec(value):
     """Absolute price ('59000') or percent offset from the mid ('-3%')."""
     s = str(value).strip()
     float(s[:-1] if s.endswith("%") else s)     # raises ValueError if not numeric
-    return s
-
-
-def entry_mode(value):
-    s = str(value).strip().lower()
-    if s not in ("always", "trend", "fvg", "trend+fvg"):
-        raise ValueError(s)
     return s
 
 
@@ -110,18 +98,19 @@ NUMERIC_FLAGS = {
     "grid_max_open": ("--grid-max-open", int),
     "pmm_spreads": ("--pmm-spreads", spreads_spec),
     "pmm_refresh": ("--pmm-refresh", float),
+    "pmm_skew": ("--pmm-skew", float),
+    "pmm_max_inventory": ("--pmm-max-inventory", float),
+    "max_loss": ("--max-loss", float),
     "st_length": ("--st-length", int),
     "st_multiplier": ("--st-multiplier", float),
     "st_threshold": ("--st-threshold", price_spec),
-    "cj_target": ("--cj-target", price_spec),
-    "cj_stop": ("--cj-stop", price_spec),
-    "cj_cooldown": ("--cj-cooldown", float),
-    "cj_entry": ("--cj-entry", entry_mode),
     "total_quote": ("--total-quote", float),
+    "leverage": ("--leverage", int),
+    "fee": ("--fee", price_spec),           # backtests only
     "interval": ("--interval", float),
     "duration": ("--duration", float),
 }
-VALID_STRATEGIES = {"grid", "pmm", "supertrend", "cj"}
+VALID_STRATEGIES = {"grid", "pmm", "supertrend"}
 
 
 class BotManager:
@@ -157,15 +146,17 @@ class BotManager:
         with self.lock:
             self.api_key, self.api_secret = key or None, secret or None
 
-    def exchange_summary(self, symbol):
-        """Live proof from Binance itself: balances, resting orders, and
+    def exchange_summary(self, symbol, exchange="binance"):
+        """Live proof from the exchange itself: balances, resting orders, and
         executed trades queried straight from the exchange (not our records)."""
         with self.lock:
             key, secret = self.api_key, self.api_secret
         if not (key and secret):
             return {"error": "no credentials saved"}
-        client = BinanceClient("demo", key, secret)
-        out = {"symbol": symbol}
+        client = {"gate": lambda: GateClient("testnet", key, secret),
+                  "gate_futures": lambda: GateFuturesClient("testnet", key, secret),
+                  }.get(exchange, lambda: BinanceClient("demo", key, secret))()
+        out = {"symbol": symbol, "exchange": exchange}
         acct = client.account()
         if acct["status"] == 200:
             out["balances"] = [b for b in acct["body"].get("balances", [])
@@ -191,7 +182,25 @@ class BotManager:
                 elif prices.get(b["asset"] + "USDT"):
                     total_usd += amount * prices[b["asset"] + "USDT"]
             out["total_usd"] = round(total_usd, 2)
-            out["daily_pnl"] = self._daily_pnl(total_usd)
+            out["daily_pnl"] = self._daily_pnl(total_usd, exchange)
+        if exchange == "gate_futures":
+            # the futures account's ground truth: the open position and the
+            # wallet ledger — this is where legacy positions, funding, and
+            # maker rebates live (none of them appear in the session tiles)
+            pos = client.position(symbol)
+            if pos["status"] == 200 and float(pos["body"].get("size_base", 0)):
+                out["position"] = pos["body"]
+            midnight = time.mktime(time.strptime(
+                time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
+            book = client.account_book(limit=500, since=midnight)
+            if book["status"] == 200:
+                by_type = {}
+                for entry in book["body"]:
+                    kind = entry.get("type", "?")
+                    by_type[kind] = by_type.get(kind, 0.0) + float(
+                        entry.get("change", 0) or 0)
+                out["today_by_type"] = {k: round(v, 4)
+                                        for k, v in sorted(by_type.items())}
         tr = client.my_trades(symbol, limit=15)
         out["trades"] = ([
             {"tradeId": t["id"], "orderId": t["orderId"],
@@ -203,9 +212,10 @@ class BotManager:
         return out
 
     @staticmethod
-    def _daily_pnl(equity):
-        """Equity change since the first reading of the local calendar day.
-        The baseline persists in DAILY_FILE so it survives restarts."""
+    def _daily_pnl(equity, exchange):
+        """Equity change since the first reading of the local calendar day,
+        tracked per exchange (a 1000-USDT futures wallet must not be compared
+        against a 10000-USD spot baseline). Persists in DAILY_FILE."""
         today = time.strftime("%Y-%m-%d")
         state = {}
         try:
@@ -213,14 +223,16 @@ class BotManager:
                 state = json.load(fh)
         except (OSError, ValueError):
             pass
-        if state.get("date") != today:
-            state = {"date": today, "baseline": equity}
+        if state.get("date") != today or "baselines" not in state:
+            state = {"date": today, "baselines": {}}
+        if exchange not in state["baselines"]:
+            state["baselines"][exchange] = equity
             try:
                 with open(DAILY_FILE, "w") as fh:
                     json.dump(state, fh)
             except OSError:
                 pass
-        return round(equity - state.get("baseline", equity), 2)
+        return round(equity - state["baselines"][exchange], 2)
 
     def credentials_info(self):
         with self.lock:
@@ -252,47 +264,12 @@ class BotManager:
             if self.proc is not None and self.proc.poll() is None:
                 return False, "bot is already running - stop it first"
             symbol = (params.get("symbol") or "BTCUSDT").strip().upper()
-            strategies_req = [s for s in (params.get("strategies") or ["grid"])
-                              if s in VALID_STRATEGIES]
-            futures_run = (not check and not backtest and "cj" in strategies_req
-                           and params.get("cj_leverage") not in (None, "", "0", "1"))
-            if futures_run:
-                # CJ compound with leverage runs on the FUTURES TESTNET via
-                # futures.py (needs futures-testnet keys, not spot demo keys)
-                cmd = futures_cmd_prefix() + ["--symbol", symbol]
-                try:
-                    cmd += ["--leverage", str(int(params["cj_leverage"]))]
-                    if params.get("cj_target"):
-                        cmd.append(f"--target={price_spec(params['cj_target'])}")
-                    if params.get("cj_stop"):
-                        cmd.append(f"--stop={price_spec(params['cj_stop'])}")
-                    if params.get("total_quote"):
-                        cmd += ["--capital", str(float(params["total_quote"]))]
-                    if params.get("interval"):
-                        cmd += ["--interval", str(float(params["interval"]))]
-                    if params.get("duration"):
-                        cmd += ["--duration", str(float(params["duration"]))]
-                    entry = str(params.get("cj_entry") or "always").strip().lower()
-                    if entry not in ("always", "trend", "fvg", "trend+fvg"):
-                        return False, f"bad entry mode: {entry!r}"
-                    cmd += ["--entry", entry]
-                    direction = str(params.get("cj_direction") or "long").strip().lower()
-                    if direction not in ("long", "short", "auto"):
-                        return False, f"bad direction: {direction!r}"
-                    cmd += ["--direction", direction]
-                except (TypeError, ValueError, KeyError) as e:
-                    return False, f"bad futures parameter: {e}"
-                if params.get("trade"):
-                    if not (self.api_key and self.api_secret):
-                        return False, ("futures trading needs FUTURES TESTNET keys "
-                                       "(testnet.binancefuture.com) saved in the "
-                                       "credentials card")
-                    cmd.append("--trade")
-                    self.mode = "trading (futures)"
-                else:
-                    self.mode = "dry-run (futures)"
-            elif backtest:
-                cmd = backtest_cmd_prefix() + ["--symbol", symbol]
+            exchange = str(params.get("exchange") or "binance").strip().lower()
+            if exchange not in VALID_EXCHANGES:
+                return False, f"bad exchange: {exchange!r}"
+            if backtest:
+                cmd = backtest_cmd_prefix() + ["--symbol", symbol,
+                                               "--exchange", exchange]
                 strategies = [s for s in (params.get("strategies") or ["grid"])
                               if s in VALID_STRATEGIES]
                 if not strategies:
@@ -303,7 +280,7 @@ class BotManager:
                 except (TypeError, ValueError):
                     return False, f"days must be a number: {params.get('days')!r}"
                 for key, (flag, cast) in NUMERIC_FLAGS.items():
-                    if key in ("interval", "duration"):
+                    if key in ("interval", "duration", "max_loss"):
                         continue        # live-loop flags; the backtester has none
                     value = params.get(key)
                     if value not in (None, ""):
@@ -314,16 +291,20 @@ class BotManager:
                                            f"or a percent like -3%: {value!r}")
                 self.mode = "backtest"
             elif check:
-                cmd = bot_cmd_prefix() + ["--symbol", symbol, "--check"]
+                cmd = bot_cmd_prefix() + ["--symbol", symbol,
+                                          "--exchange", exchange, "--check"]
                 self.mode = "check"
             else:
-                cmd = bot_cmd_prefix() + ["--symbol", symbol]
+                cmd = bot_cmd_prefix() + ["--symbol", symbol,
+                                          "--exchange", exchange]
                 strategies = [s for s in (params.get("strategies") or ["grid"])
                               if s in VALID_STRATEGIES]
                 if not strategies:
                     return False, "no valid strategies selected"
                 cmd += ["--strategies", ",".join(strategies)]
                 for key, (flag, cast) in NUMERIC_FLAGS.items():
+                    if key == "fee":
+                        continue        # backtest-only; bot.py has no --fee
                     value = params.get(key)
                     if value not in (None, ""):
                         try:
@@ -335,20 +316,29 @@ class BotManager:
                                            f"or a percent like -3%: {value!r}")
                 if params.get("trade"):
                     if not (self.api_key and self.api_secret):
+                        if exchange.startswith("gate"):
+                            return False, ("trading needs credentials - create a "
+                                           "key in Testnet API Key Management on "
+                                           "gate.com (spot trade permission), "
+                                           "then save it here")
                         return False, ("trading needs credentials - create a key in "
                                        "API Management while in Demo Trading on "
                                        "binance.com, then save it here")
                     cmd.append("--trade")
-                    self.mode = "trading"
+                    self.mode = {"gate": "trading (gate testnet)",
+                                 "gate_futures": "trading (gate futures testnet)",
+                                 }.get(exchange, "trading")
                 else:
                     self.mode = "dry-run"
 
             env = os.environ.copy()
-            env.pop("BINANCE_API_KEY", None)
-            env.pop("BINANCE_API_SECRET", None)
+            for var in ("BINANCE_API_KEY", "BINANCE_API_SECRET",
+                        "GATE_API_KEY", "GATE_API_SECRET"):
+                env.pop(var, None)
             if self.api_key and self.api_secret:
-                env["BINANCE_API_KEY"] = self.api_key
-                env["BINANCE_API_SECRET"] = self.api_secret
+                prefix = "GATE" if exchange.startswith("gate") else "BINANCE"
+                env[f"{prefix}_API_KEY"] = self.api_key
+                env[f"{prefix}_API_SECRET"] = self.api_secret
             env["PYTHONUNBUFFERED"] = "1"
             env["PYTHONIOENCODING"] = "utf-8"
             env["GRIDBOT_MANAGED"] = "1"        # bot honours "STOP" on stdin
@@ -465,7 +455,10 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/exchange":
             qs = urllib.parse.parse_qs(parsed.query)
             symbol = (qs.get("symbol", ["BTCUSDT"])[0] or "BTCUSDT").upper()
-            self._send(200, MANAGER.exchange_summary(symbol))
+            exchange = (qs.get("exchange", ["binance"])[0] or "binance").lower()
+            if exchange not in VALID_EXCHANGES:
+                exchange = "binance"
+            self._send(200, MANAGER.exchange_summary(symbol, exchange))
         else:
             self._send(404, {"error": "not found"})
 

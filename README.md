@@ -33,8 +33,10 @@ bare-features/
 │   ├── store_binance_keys.py    # save API keys into the encrypted credential store
 │   └── results/                 # per-strategy backtest output (JSON)
 ├── bot/                     # standalone demo trading bot (pure stdlib, runs with `py`)
-│   ├── bot.py                   # all three strategies live on Binance Spot Demo Mode
-│   ├── binance_client.py        # REST client + request/rate-limit accounting
+│   ├── bot.py                   # all three strategies, live on Binance Spot Demo Mode
+│   │                            #   or Gate.com spot testnet (--exchange gate)
+│   ├── binance_client.py        # Binance REST client + request/rate-limit accounting
+│   ├── gate_client.py           # Gate.com spot REST client (same interface/shapes)
 │   ├── strategies.py            # live grid_strike / pmm_simple / supertrend_v1
 │   ├── backtest.py              # replay real candles through the live strategy code
 │   ├── gui.py                   # simple tkinter form UI for Grid Strike

@@ -27,10 +27,33 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from binance_client import BinanceClient  # noqa: E402
 from bot import (PnLTracker, STRATEGY_NAMES, add_strategy_args,  # noqa: E402
                  build_strategies, get_filters)
+from gate_client import GateClient, GateFuturesClient  # noqa: E402
 from strategies import MarketState, round_to  # noqa: E402
 
 CANDLE_MS = {"1m": 60_000, "3m": 180_000, "5m": 300_000,
              "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000}
+
+# Gate serves only the most recent 10000 candles per interval ("Candlestick
+# too long ago"), and 3m is aggregated from 1m — so how far back an interval
+# reaches is 10000 of its BASE candles (with a margin for the in-flight run)
+GATE_MAX_POINTS = 9_800
+
+
+def gate_reach_ms(interval):
+    base = "1m" if interval == "3m" else interval
+    return GATE_MAX_POINTS * CANDLE_MS[base]
+
+
+def pick_gate_interval(requested, days):
+    """The requested interval, or the smallest coarser one whose history
+    covers the window; None if even 1h cannot reach back that far."""
+    window_ms = days * 86_400_000
+    if window_ms <= gate_reach_ms(requested):
+        return requested
+    for iv in sorted(CANDLE_MS, key=CANDLE_MS.get):
+        if CANDLE_MS[iv] > CANDLE_MS[requested] and window_ms <= gate_reach_ms(iv):
+            return iv
+    return None
 
 
 def fetch_candles(client, symbol, interval, days):
@@ -39,15 +62,16 @@ def fetch_candles(client, symbol, interval, days):
     start = int(time.time() * 1000) - total * step
     out = []
     while len(out) < total:
-        r = client._request("GET", "/api/v3/klines",
-                            {"symbol": symbol, "interval": interval,
-                             "limit": 1000, "startTime": start})
-        batch = r["body"] if r["status"] == 200 else []
+        r = client.klines_range(symbol, interval, start, limit=1000)
+        if r["status"] != 200:
+            print(f"candle fetch failed: {r['body'].get('msg', r['body'])}")
+            break
+        batch = r["body"]
         if not batch:
             break
         out.extend(batch)
         start = batch[-1][0] + step
-        if len(batch) < 1000:
+        if len(batch) < 2:      # a single candle can't make progress
             break
     return out[:total]
 
@@ -147,24 +171,68 @@ def main():
     p.add_argument("--days", type=float, default=7, help="history window to replay")
     p.add_argument("--candles", default="3m", choices=sorted(CANDLE_MS),
                    help="candle interval (finer = more accurate fills, more data)")
-    p.add_argument("--fee", default="0.1%",
-                   help="fee per fill, e.g. 0.1%% (demo charges 0, live spot 0.1%%)")
+    p.add_argument("--fee", default=None,
+                   help="fee per fill, e.g. 0.1%% (negative = maker rebate). "
+                        "Default matches the exchange's maker rate: binance "
+                        "0.1%%, gate spot 0.2%%, gate_futures -0.01%%")
     add_strategy_args(p)
     args = p.parse_args()
 
-    fee_tok = args.fee.strip()
+    # the bot places only maker orders, so default to each venue's MAKER rate.
+    # gate futures: contract metadata advertises a -0.01% rebate, but a
+    # standard account's ledger shows +0.02% actually charged per maker fill
+    # (the rebate is a market-maker-program rate) — default to what accounts
+    # really pay; pass --fee=-0.01% only if your account has the rebate
+    default_fees = {"binance": "0.1%", "gate": "0.2%", "gate_futures": "0.02%"}
+    fee_tok = (args.fee or default_fees.get(args.exchange, "0.1%")).strip()
     fee_rate = (Decimal(fee_tok[:-1]) / 100 if fee_tok.endswith("%")
                 else Decimal(fee_tok))
+    if args.fee is None:
+        print(f"fee defaulted to {fee_tok} per fill "
+              f"({args.exchange}'s maker rate; override with --fee)")
 
-    client = BinanceClient("demo")
+    # backtests want real market history: Gate's LIVE public data (keyless),
+    # not the testnet's thin simulated book; Binance demo mirrors live anyway
+    client = {"gate": lambda: GateClient("live"),
+              "gate_futures": lambda: GateFuturesClient("live"),
+              }.get(args.exchange, lambda: BinanceClient("demo"))()
+
+    if args.exchange.startswith("gate"):
+        usable = pick_gate_interval(args.candles, args.days)
+        if usable is None:
+            sys.exit(f"Gate keeps only the most recent {GATE_MAX_POINTS + 200} "
+                     f"candles per interval — even 1h cannot cover "
+                     f"{args.days:g} days (max ~{gate_reach_ms('1h') // 86_400_000} "
+                     f"days); shorten --days")
+        if usable != args.candles:
+            reach_days = gate_reach_ms(args.candles) / 86_400_000
+            print(f"NOTE: Gate keeps only the most recent "
+                  f"{GATE_MAX_POINTS + 200} candles per interval, so "
+                  f"{args.candles} reaches back ~{reach_days:.1f} days — "
+                  f"using {usable} candles for this {args.days:g}-day window "
+                  f"instead (keep {args.candles} by shortening --days)")
+            args.candles = usable
     filters, _ = get_filters(client, args.symbol)
     strategies = build_strategies(args)
     if not strategies:
         sys.exit(f"no valid strategies in '{args.strategies}'")
     names = ", ".join(STRATEGY_NAMES.get(k, k) for k in strategies)
 
-    print(f"BACKTEST {args.symbol} | {names} | {args.days:g} days of "
-          f"{args.candles} candles | fee {fee_rate * 100:.2f}% per fill")
+    print(f"BACKTEST {args.symbol} on {client.label} | {names} | "
+          f"{args.days:g} days of {args.candles} candles | "
+          f"fee {fee_rate * 100:.2f}% per fill")
+    parts = [f"budget {args.total_quote} quote"]
+    if "PMM" in strategies:
+        parts.append(f"pmm spreads {args.pmm_spreads} refresh {args.pmm_refresh:g}s")
+    if "GS" in strategies:
+        parts.append(f"grid {args.grid_levels} levels "
+                     f"{args.grid_start or '-3%'}..{args.grid_end or '+3%'} "
+                     f"limit {args.grid_limit or 'start-2%'} "
+                     f"max-open {args.grid_max_open}")
+    if "ST" in strategies:
+        parts.append(f"supertrend len {args.st_length} x{args.st_multiplier:g} "
+                     f"threshold {args.st_threshold}")
+    print("parameters: " + " | ".join(parts))
     candles = fetch_candles(client, args.symbol, args.candles, args.days)
     if len(candles) < 30:
         sys.exit(f"not enough candle history returned ({len(candles)})")

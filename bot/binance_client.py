@@ -120,6 +120,7 @@ class BinanceClient:
     def __init__(self, mode="demo", api_key=None, api_secret=None, meter=None):
         self.base = BASES[mode]
         self.mode = mode
+        self.label = f"Binance Spot {mode.upper()}"
         self.api_key = api_key
         self.api_secret = api_secret
         self.meter = meter or RequestMeter()
@@ -226,6 +227,12 @@ class BinanceClient:
     def klines(self, symbol, interval, limit=100):
         return self._request("GET", "/api/v3/klines",
                              {"symbol": symbol, "interval": interval, "limit": limit})
+
+    def klines_range(self, symbol, interval, start_ms, limit=1000):
+        """Up to `limit` candles starting at start_ms — the backtester's fetch unit."""
+        return self._request("GET", "/api/v3/klines",
+                             {"symbol": symbol, "interval": interval,
+                              "limit": limit, "startTime": start_ms})
 
     # ------------------------------------------------------------ signed api
 

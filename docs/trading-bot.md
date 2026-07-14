@@ -1,11 +1,12 @@
-# bare-features trading bot — grid_strike + pmm_simple + supertrend_v1 on Binance Spot Demo Mode
+# bare-features trading bot — grid_strike + pmm_simple + supertrend_v1 on Binance Spot Demo Mode / Gate.com Spot
 
 A standalone trading bot that runs live versions of the three proof-of-concept
-strategies against **Binance Spot Demo Mode** (`https://demo-api.binance.com`),
-with first-class **request accounting**: every REST call is counted, weighted, and
-reconciled against the rate-limit headers Binance returns. Because this is a
-market-making bot, staying inside the exchange's request budget is as much a part
-of the strategy as the quotes themselves.
+strategies against **Binance Spot Demo Mode** (`https://demo-api.binance.com`)
+or **Gate.com spot** (`--exchange gate`, see §2b), with first-class **request
+accounting**: every REST call is counted, weighted, and reconciled against the
+rate-limit headers Binance returns. Because this is a market-making bot, staying
+inside the exchange's request budget is as much a part of the strategy as the
+quotes themselves.
 
 Everything is pure Python standard library — no hummingbot install needed — so it
 runs on the host with `py` (same as `poc/exchange_test_trade.py`).
@@ -15,6 +16,7 @@ bare-features/
 ├── docs/trading-bot.md        # this document
 └── bot/
     ├── binance_client.py      # signed REST client + RequestMeter (rate-limit accounting)
+    ├── gate_client.py         # Gate.com spot client — same interface, Binance-shaped responses
     ├── strategies.py          # GridStrike, PMMSimple, Supertrend live implementations
     ├── bot.py                 # entry point: connection check + trading loop + reports
     ├── gui.py                 # simple direct tkinter form UI for Grid Strike
@@ -65,6 +67,55 @@ Signed requests use **server time**, not the local clock: the client syncs an
 offset via `GET /api/v3/time` before the first signed call and resyncs+retries
 once on a `-1021` rejection, so a drifting Windows clock can't break auth.
 Client order ids stick to Binance's `[a-zA-Z0-9-_]` charset (`GS-L1_7`).
+
+## 2b. Gate.com spot (`--exchange gate`)
+
+`gate_client.py` implements the same client interface against Gate's v4 API:
+it accepts Binance-style parameters and returns Binance-shaped responses, so
+the runner, backtester, and dashboard work unchanged. Like Binance, trading
+runs on the demo environment and the live API is `--check`-only:
+
+| | Gate testnet (trading) | Gate live (read-only check) |
+| --- | --- | --- |
+| Base URL | `https://api-testnet.gateapi.io/api/v4` | `https://api.gateio.ws/api/v4` (API host kept its pre-rebrand name) |
+| Web UI | **<https://testnet.gate.com>** — watch the bot's orders live | gate.com |
+| Keys | Testnet API Key Management on gate.com (up to 20 v4 keys; unbound keys auto-disable after 90 days — consider binding your IP) | — |
+| Funds | simulated | real (which is why the trading loop refuses it) |
+
+API mapping handled by the client:
+
+| | Binance | Gate.com |
+| --- | --- | --- |
+| Symbol | `BTCUSDT` | translated to `BTC_USDT` automatically |
+| Auth | HMAC-SHA256 query signature | HMAC-SHA512 of `METHOD\nPATH\nQUERY\nSHA512(body)\nTS` in `KEY`/`SIGN`/`Timestamp` headers |
+| Post-only | `LIMIT_MAKER` | `limit` + `time_in_force: poc` |
+| Market buy | `quoteOrderQty` | `market` order with quote-denominated `amount` |
+| Client order id | `newClientOrderId` | `text` field, `t-` prefixed |
+| 3m candles | native | aggregated locally from 1m (Gate has no 3m interval) |
+| Keys | `BINANCE_API_KEY/_SECRET` | `GATE_API_KEY/_SECRET` (testnet keys for trading) |
+
+Backtests always fetch candles from Gate's **live** public endpoints
+(keyless, no risk) — the testnet's simulated book is too thin to be useful
+history. Gate's spot base fee is 0.2% per fill — pass `--fee 0.2%` to the
+backtester for realistic Gate results.
+
+### Gate USDT-perpetual futures (`--exchange gate_futures`)
+
+`GateFuturesClient` adapts Gate's `/futures/usdt` API to the same surface, so
+any strategy — pmm_simple in particular — runs on the perp book unchanged:
+
+- **Order sizes are integer contracts** (1 contract = `quanto_multiplier` of
+  the base asset, 0.0001 BTC on BTC_USDT); base quantities are converted and
+  must come out to ≥ 1 contract.
+- **Sells open shorts** — there is no spot inventory limit, so pmm quotes
+  both sides symmetrically all the time.
+- **Maker orders earn a rebate** (-0.01%) instead of paying a fee; takers pay
+  0.075%. For a realistic pmm backtest use `--fee=-0.01%`.
+- **`--leverage N`** (default 1) is set on the contract before the first real
+  order. At 1x margin behaves like the spot budget; at Nx the liquidation
+  distance shrinks to roughly 100%/N of the entry price. The dashboard shows
+  the leverage field when the futures exchange is selected.
+- Testnet keys need **futures** trade permission.
 
 ## 3. Binance rate limits (why we count requests)
 

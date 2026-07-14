@@ -27,13 +27,17 @@ def round_to(value, increment, mode=ROUND_HALF_UP):
 class MarketState:
     """Snapshot handed to strategies each tick."""
 
-    def __init__(self, mid, bid, ask, filters, candles=None, ts=None):
+    def __init__(self, mid, bid, ask, filters, candles=None, ts=None,
+                 fair=None):
         self.mid = mid
         self.bid = bid
         self.ask = ask
         self.filters = filters      # tick_size / step_size / min_notional
         self.candles = candles      # list of [open_time, o, h, l, c, ...] or None
         self.ts = ts or time.time()
+        # fair value estimate (microprice) — falls back to the plain mid
+        # when book sizes are unavailable (e.g. candle-driven backtests)
+        self.fair = fair if fair is not None else mid
 
 
 # ---------------------------------------------------------------- grid_strike
@@ -129,19 +133,30 @@ class GridStrike:
 # ----------------------------------------------------------------- pmm_simple
 
 class PMMSimple:
-    """Symmetric maker quotes at configured spreads around the mid price,
-    refreshed on drift or age — the classic ORDERS-bucket consumer."""
+    """Maker quotes at configured spreads around a FAIR VALUE (microprice
+    when the runner supplies book sizes, else the mid), refreshed on drift
+    or age. Inventory-aware, HFT-style: the quote center is skewed against
+    the position (long inventory shades both quotes down so the ask works
+    harder and the bid stops chasing), and a hard inventory cap drops the
+    side that would grow the position further."""
 
     PREFIX = "PMM"
 
     def __init__(self, buy_spreads=(Decimal("0.001"), Decimal("0.003")),
                  sell_spreads=(Decimal("0.001"), Decimal("0.003")),
-                 total_amount_quote=Decimal("200"), executor_refresh_time=60):
+                 total_amount_quote=Decimal("200"), executor_refresh_time=60,
+                 skew=Decimal("0.5"), max_inventory_quote=None):
         self.buy_spreads = [Decimal(s) for s in buy_spreads]
         self.sell_spreads = [Decimal(s) for s in sell_spreads]
         self.total_amount_quote = Decimal(total_amount_quote)
         self.executor_refresh_time = executor_refresh_time
+        self.skew = Decimal(skew)                   # 0 = off, 1 = full shade
+        self.max_inventory = (Decimal(max_inventory_quote)
+                              if max_inventory_quote not in (None, "")
+                              else Decimal(total_amount_quote))
+        self.position = Decimal("0")                # signed base from own fills
         self.fills = 0
+        self.capped_ticks = 0
 
     def tags(self):
         return ([f"{self.PREFIX}-B{i}" for i in range(len(self.buy_spreads))]
@@ -150,209 +165,49 @@ class PMMSimple:
     def desired_orders(self, state):
         n_levels = len(self.buy_spreads) + len(self.sell_spreads)
         amount = self.total_amount_quote / n_levels
+        # inventory ratio in [-1, 1]: how full the position book is
+        inv_value = self.position * state.fair
+        ratio = max(Decimal("-1"), min(Decimal("1"),
+                                       inv_value / self.max_inventory))
+        # Avellaneda-style shade: shift the quote center against the
+        # inventory by up to skew x the inner spread
+        center = state.fair * (1 - self.skew * ratio * self.buy_spreads[0])
+        cap_buys = ratio >= 1
+        cap_sells = ratio <= -1
+        if cap_buys or cap_sells:
+            self.capped_ticks += 1
         orders = []
-        for i, spread in enumerate(self.buy_spreads):
-            orders.append({"tag": f"{self.PREFIX}-B{i}", "side": "BUY",
-                           "type": "LIMIT_MAKER",
-                           "price": state.mid * (1 - spread), "quote_qty": amount,
-                           "tolerance": spread * Decimal("0.2"),
-                           "max_age": self.executor_refresh_time})
-        for i, spread in enumerate(self.sell_spreads):
-            orders.append({"tag": f"{self.PREFIX}-S{i}", "side": "SELL",
-                           "type": "LIMIT_MAKER",
-                           "price": state.mid * (1 + spread), "quote_qty": amount,
-                           "tolerance": spread * Decimal("0.2"),
-                           "max_age": self.executor_refresh_time})
+        if not cap_buys:
+            for i, spread in enumerate(self.buy_spreads):
+                orders.append({"tag": f"{self.PREFIX}-B{i}", "side": "BUY",
+                               "type": "LIMIT_MAKER",
+                               "price": center * (1 - spread),
+                               "quote_qty": amount,
+                               "tolerance": spread * Decimal("0.2"),
+                               "max_age": self.executor_refresh_time})
+        if not cap_sells:
+            for i, spread in enumerate(self.sell_spreads):
+                orders.append({"tag": f"{self.PREFIX}-S{i}", "side": "SELL",
+                               "type": "LIMIT_MAKER",
+                               "price": center * (1 + spread),
+                               "quote_qty": amount,
+                               "tolerance": spread * Decimal("0.2"),
+                               "max_age": self.executor_refresh_time})
         return orders
 
     def on_fill(self, tag, order_body):
         self.fills += 1
+        qty = Decimal(order_body.get("executedQty", "0") or "0")
+        # tags encode the side: PMM-B* was a buy, PMM-S* a sell
+        self.position += qty if tag.startswith(f"{self.PREFIX}-B") else -qty
 
     def summary(self):
-        return f"pmm_simple: {self.fills} maker fills"
-
-
-# ------------------------------------------------------------- entry filters
-
-def bullish_fvgs(candles, lookback=100):
-    """Unfilled bullish fair value gaps, newest last. 3-candle definition:
-    candle A's HIGH < candle C's LOW leaves a gap (A.high, C.low) carved by the
-    displacement candle B. The gap dies when a later candle's low trades back
-    through the bottom of the zone."""
-    zones = []
-    cs = candles[-lookback:]
-    for i in range(len(cs) - 2):
-        gap_bottom = float(cs[i][2])        # high of candle A
-        gap_top = float(cs[i + 2][3])       # low of candle C
-        if gap_top > gap_bottom:
-            invalidated = any(float(c[3]) <= gap_bottom for c in cs[i + 3:])
-            if not invalidated:
-                zones.append((gap_bottom, gap_top))
-    return zones
-
-
-def bearish_fvgs(candles, lookback=100):
-    """Mirror image: candle A's LOW > candle C's HIGH leaves a gap above the
-    market (C.high, A.low); price rallying back INTO it is the short entry.
-    The gap dies when a later candle's high trades through the zone top."""
-    zones = []
-    cs = candles[-lookback:]
-    for i in range(len(cs) - 2):
-        gap_top = float(cs[i][3])           # low of candle A
-        gap_bottom = float(cs[i + 2][2])    # high of candle C
-        if gap_top > gap_bottom:
-            invalidated = any(float(c[2]) >= gap_top for c in cs[i + 3:])
-            if not invalidated:
-                zones.append((gap_bottom, gap_top))
-    return zones
-
-
-class EntryFilter:
-    """Decides IF an entry is allowed and WHICH side it should be.
-    Modes: always / trend / fvg / trend+fvg.
-    Directions: long, short, or auto (supertrend picks the side; bearish
-    setups use the mirrored checks — trend down, bearish FVG retrace).
-    Shared by the spot strategy, the futures trader, and the backtester."""
-
-    MODES = ("always", "trend", "fvg", "trend+fvg")
-    DIRECTIONS = ("long", "short", "auto")
-
-    def __init__(self, mode="always", direction="long", length=20, multiplier=4.0):
-        if mode not in self.MODES:
-            raise ValueError(f"entry mode {mode!r} not in {self.MODES}")
-        if direction not in self.DIRECTIONS:
-            raise ValueError(f"direction {direction!r} not in {self.DIRECTIONS}")
-        self.mode = mode
-        self.direction = direction
-        self.length = length
-        self.multiplier = multiplier
-
-    def _trend(self, candles):
-        highs = [float(k[2]) for k in candles]
-        lows = [float(k[3]) for k in candles]
-        closes = [float(k[4]) for k in candles]
-        _, direction = supertrend(highs, lows, closes, self.length, self.multiplier)
-        return direction
-
-    def decide(self, candles, price):
-        """-> (side, reason): side is 'BUY', 'SELL', or None (stay flat)."""
-        needs_candles = self.mode != "always" or self.direction == "auto"
-        if not needs_candles:
-            return ("BUY" if self.direction == "long" else "SELL"), "always-in"
-        if not candles or len(candles) < self.length + 3:
-            return None, "waiting for candle history"
-
-        trend = self._trend(candles)
-        if self.direction == "auto":
-            side = "BUY" if trend == 1 else "SELL"
-        else:
-            side = "BUY" if self.direction == "long" else "SELL"
-        reasons = []
-        if "trend" in self.mode or self.direction == "auto":
-            want = 1 if side == "BUY" else -1
-            if trend != want:
-                return None, (f"trend is {'UP' if trend == 1 else 'DOWN'}, "
-                              f"waiting for {'UP' if want == 1 else 'DOWN'}")
-            reasons.append(f"trend {'up' if want == 1 else 'down'}")
-        if "fvg" in self.mode:
-            zones = bullish_fvgs(candles) if side == "BUY" else bearish_fvgs(candles)
-            hit = next((z for z in zones if z[0] <= price <= z[1]), None)
-            if hit is None:
-                kind = "bullish" if side == "BUY" else "bearish"
-                return None, (f"price not inside any of the "
-                              f"{len(zones)} open {kind} FVGs")
-            reasons.append(f"in FVG {hit[0]:.2f}-{hit[1]:.2f}")
-        return side, " + ".join(reasons)
-
-    def ok(self, candles, price):
-        """Legacy long-only gate (spot cannot short)."""
-        side, reason = self.decide(candles, price)
-        return side == "BUY", reason
-
-
-# --------------------------------------------------------------- cj_compound
-
-class CjCompound:
-    """CJ's compounding strategy: always ALL-IN with current capital, take
-    profit at +target (default 3%), optional stop loss, then immediately
-    re-enter with the grown (or shrunk) capital. Exponential by construction:
-    capital after n winning trades = start x (1+target)^n."""
-
-    PREFIX = "CJ"
-
-    def __init__(self, target_pct=Decimal("0.03"), stop_pct=None,
-                 total_amount_quote=Decimal("200"), reentry_cooldown=0,
-                 entry_filter=None):
-        self.target_pct = Decimal(target_pct)
-        self.stop_pct = Decimal(stop_pct) if stop_pct not in (None, "") else None
-        self.start_capital = Decimal(total_amount_quote)
-        self.capital = Decimal(total_amount_quote)
-        self.reentry_cooldown = reentry_cooldown    # seconds flat between trades
-        self.entry_filter = entry_filter or EntryFilter("always")
-        self.last_filter_reason = ""
-        self.position_qty = Decimal("0")
-        self.entry_price = None
-        self.last_exit_ts = None    # stamped from state.ts (works in backtests too)
-        self._exit_pending = False
-        self.wins = self.losses = 0
-        self._seq = 0
-
-    def tags(self):
-        return [f"{self.PREFIX}-IN", f"{self.PREFIX}-TP", f"{self.PREFIX}-OUT"]
-
-    def desired_orders(self, state):
-        if self.position_qty == 0:
-            if self._exit_pending:
-                self.last_exit_ts = state.ts
-                self._exit_pending = False
-            if (self.last_exit_ts is not None
-                    and state.ts - self.last_exit_ts < self.reentry_cooldown):
-                return []
-            allowed, reason = self.entry_filter.ok(state.candles, float(state.mid))
-            self.last_filter_reason = reason
-            if not allowed:
-                return []
-            self._seq += 1
-            return [{"tag": f"{self.PREFIX}-IN", "side": "BUY", "type": "MARKET",
-                     "quote_qty": self.capital, "once": self._seq}]
-        # holding: stop loss beats take-profit if both would apply
-        if (self.stop_pct is not None
-                and state.mid <= self.entry_price * (1 - self.stop_pct)):
-            self._seq += 1
-            return [{"tag": f"{self.PREFIX}-OUT", "side": "SELL", "type": "MARKET",
-                     "qty": self.position_qty, "once": self._seq}]
-        return [{"tag": f"{self.PREFIX}-TP", "side": "SELL", "type": "LIMIT_MAKER",
-                 "price": self.entry_price * (1 + self.target_pct),
-                 "qty": self.position_qty}]
-
-    def on_fill(self, tag, order_body):
-        qty = Decimal(order_body.get("executedQty", "0"))
-        # market orders report price=0; the traded value is cummulativeQuoteQty
-        quote_val = Decimal(order_body.get("cummulativeQuoteQty", "0") or "0")
-        if not quote_val:
-            quote_val = qty * Decimal(order_body.get("price", "0") or "0")
-        if tag == f"{self.PREFIX}-IN":
-            self.position_qty = qty
-            self.entry_price = quote_val / qty if qty else None
-        else:
-            if quote_val:
-                if quote_val > self.capital:
-                    self.wins += 1
-                else:
-                    self.losses += 1
-                self.capital = quote_val
-            self.position_qty = Decimal("0")
-            self.entry_price = None
-            self._exit_pending = True
-
-    def summary(self):
-        growth = (self.capital / self.start_capital - 1) * 100
-        state = (f"holding {self.position_qty.quantize(Decimal('0.00000001')).normalize():f} "
-                 f"@ {self.entry_price:.2f}" if self.position_qty
-                 else f"flat ({self.last_filter_reason or 'no signal yet'})")
-        return (f"cj_compound: {self.wins} wins, {self.losses} losses; capital "
-                f"{self.start_capital:.2f} -> {self.capital:.2f} ({growth:+.2f}%); "
-                f"entry={self.entry_filter.mode}; {state}")
+        shown = abs(self.position).quantize(Decimal("0.00000001")).normalize()
+        stance = ("flat" if not self.position else
+                  f"{'long' if self.position > 0 else 'short'} {shown:f} base")
+        return (f"pmm_simple: {self.fills} maker fills; inventory {stance}"
+                + (f"; cap hit on {self.capped_ticks} ticks"
+                   if self.capped_ticks else ""))
 
 
 # -------------------------------------------------------------- supertrend_v1

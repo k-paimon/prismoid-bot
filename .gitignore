@@ -3,3 +3,9 @@ __pycache__/
 bot/build/
 bot/dist/
 bot/*.spec
+
+.vercel
+.env*
+node_modules/
+.next/
+docs/~$*

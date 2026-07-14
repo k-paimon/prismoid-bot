@@ -68,7 +68,6 @@ class Service:
         if self.key == "api":
             env["GRIDBOT_BOT_CMD"] = json.dumps(service_cmd("bot"))
             env["GRIDBOT_BACKTEST_CMD"] = json.dumps(service_cmd("backtest"))
-            env["GRIDBOT_FUTURES_CMD"] = json.dumps(service_cmd("futures"))
         return env
 
     def start(self, log):
@@ -297,13 +296,9 @@ def main():
             import backtest
             sys.argv = ["backtest"] + rest
             backtest.main()
-        elif name == "futures":
-            import futures
-            sys.argv = ["futures"] + rest
-            futures.main()
         else:
             sys.exit(f"unknown --service {name!r} "
-                     f"(use api, web, bot, backtest, or futures)")
+                     f"(use api, web, bot, or backtest)")
         return
     run_gui()
 

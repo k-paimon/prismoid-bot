@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grid Strike Bot - Binance Demo</title>
+<title>Grid Strike Bot</title>
 <style>
   :root {
     --bg: #f4f6f8; --card: #ffffff; --ink: #1c2733; --muted: #6b7a8c;
@@ -123,8 +123,8 @@
 </head>
 <body>
 <header>
-  <h1>Grid Strike Bot &mdash; Binance Spot Demo</h1>
-  <a class="hint" href="https://demo.binance.com" target="_blank"
+  <h1 id="pageTitle">Grid Strike Bot &mdash; Binance Spot Demo</h1>
+  <a class="hint" id="watchLink" href="https://demo.binance.com" target="_blank"
      style="text-decoration:none">watch on demo.binance.com &nearr;</a>
   <span id="apiBadge" class="badge">API: checking...</span>
   <span id="botBadge" class="badge">bot: idle</span>
@@ -167,13 +167,21 @@
 <main>
 <div>
   <div class="card">
-    <h2>Demo account credentials</h2>
-    <label title="The public half of your demo API key pair — identifies your demo account to Binance"><span class="tt">API key</span> <input type="text" id="apiKey" autocomplete="off"></label>
-    <label title="The private half — used to sign requests. Shown only once by Binance when you create the key"><span class="tt">API secret</span> <input type="password" id="apiSecret" autocomplete="off"></label>
+    <h2>Exchange &amp; credentials</h2>
+    <label title="All run on the exchange's demo environment: Binance Spot Demo Mode, or Gate.com's testnet (testnet.gate.com) — demo funds either way. Futures = USDT-perpetuals: sells open shorts (no spot inventory limit) and makers earn a fee rebate"><span class="tt">Exchange</span>
+      <select id="exchange">
+        <option value="binance">Binance &mdash; Spot Demo (paper)</option>
+        <option value="gate">Gate.com &mdash; Spot Testnet (paper)</option>
+        <option value="gate_futures" selected>Gate.com &mdash; Futures Testnet (paper)</option>
+      </select>
+    </label>
+    <label id="leverageRow" style="display:none" title="Position leverage on the futures contract. 1 = margin behaves like the spot budget. At Nx the liquidation distance shrinks to roughly 100%/N of the entry price — 10x dies on a 10% move"><span class="tt">Leverage (futures)</span> <input type="text" id="leverage" placeholder="1"></label>
+    <label title="The public half of your API key pair — identifies your account to the exchange"><span class="tt">API key</span> <input type="text" id="apiKey" autocomplete="off"></label>
+    <label title="The private half — used to sign requests. Shown only once by the exchange when you create the key"><span class="tt">API secret</span> <input type="password" id="apiSecret" autocomplete="off"></label>
     <button id="saveCreds">Save credentials</button>
     <button id="clearCreds">Clear</button>
     <div class="hint" id="credsState">no credentials saved</div>
-    <div class="hint">Log into Binance, switch to
+    <div class="hint" id="credsHelp">Log into Binance, switch to
       <a href="https://demo.binance.com" target="_blank">Demo Trading</a>, then
       create a key in API Management. Keys are held in memory only &mdash;
       never written to disk.</div>
@@ -182,10 +190,9 @@
   <div class="card">
     <h2>Strategy &mdash; pick one</h2>
     <div class="checks">
-      <label title="Rests a ladder of buy orders below the price; every fill is resold one grid level higher, pocketing the step. Best in sideways, choppy markets"><input type="radio" name="strategy" value="grid" checked> <span class="tt">grid strike</span></label>
-      <label title="Market making: continuously quotes buys and sells around the mid price and refreshes them as it moves. Earns the spread while price oscillates"><input type="radio" name="strategy" value="pmm"> <span class="tt">pmm simple</span></label>
+      <label title="Rests a ladder of buy orders below the price; every fill is resold one grid level higher, pocketing the step. Best in sideways, choppy markets"><input type="radio" name="strategy" value="grid"> <span class="tt">grid strike</span></label>
+      <label title="Market making: continuously quotes buys and sells around the mid price and refreshes them as it moves. Earns the spread while price oscillates — on futures both sides quote freely (sells open shorts) and makers earn a rebate"><input type="radio" name="strategy" value="pmm" checked> <span class="tt">pmm simple</span></label>
       <label title="Trend following: buys when the Supertrend indicator turns bullish near the trend line, sells the position when it flips bearish. Best in trending markets"><input type="radio" name="strategy" value="supertrend"> <span class="tt">supertrend</span></label>
-      <label title="CJ's compounding system: ALL-IN with current capital, sell at +target, re-enter with the grown capital. Exponential when it wins — backtest it before trading it"><input type="radio" name="strategy" value="cj"> <span class="tt">cj compound</span></label>
     </div>
   </div>
 
@@ -199,6 +206,10 @@
     <div class="row2">
       <label title="How often (in seconds) the bot re-reads the market and adjusts its orders. Lower = more responsive but more API requests"><span class="tt">Tick interval (s)</span> <input type="text" id="interval" value="10"></label>
       <label title="Auto-stop after this many seconds. LEAVE BLANK to keep running until you press Stop (this value is not remembered between visits)"><span class="tt">Duration (s)</span> <input type="text" id="duration" placeholder="blank = until stopped"></label>
+    </div>
+    <div class="row2">
+      <label title="Kill switch: if the session PnL falls below minus this many quote units, the bot cancels every order and stops itself. BLANK = no limit"><span class="tt">Max session loss (quote)</span> <input type="text" id="max_loss" placeholder="blank = none"></label>
+      <div></div>
     </div>
 
     <div id="params_grid">
@@ -220,8 +231,12 @@
     <div id="params_pmm" style="display:none">
       <div class="psec">PMM simple</div>
       <div class="row2">
-        <label title="One buy AND one sell order per spread, so 0.1%,0.3%,0.5% = 6 orders. Each spread is the distance from the mid price"><span class="tt">Spreads (per side)</span> <input type="text" id="pmm_spreads" placeholder="0.1%, 0.3%"></label>
+        <label title="One buy AND one sell order per spread, so 0.1%,0.3%,0.5% = 6 orders. Each spread is the distance from the fair value (microprice). ALWAYS include the % sign — 0.01 without it means 1%"><span class="tt">Spreads (per side)</span> <input type="text" id="pmm_spreads" placeholder="0.1%, 0.3%"></label>
         <label title="Quotes are cancelled and re-placed after this many seconds, or sooner if the price drifts away from them"><span class="tt">Quote refresh (s)</span> <input type="text" id="pmm_refresh" placeholder="60"></label>
+      </div>
+      <div class="row2">
+        <label title="HFT inventory management: 0 = classic symmetric quotes. Higher values shade both quotes against the position — long inventory pushes quotes down so the ask offloads faster and the bid stops accumulating"><span class="tt">Inventory skew (0-1)</span> <input type="text" id="pmm_skew" placeholder="0.5"></label>
+        <label title="Hard position cap in quote units: once the position value reaches this, the side that would grow it further stops quoting until it is reduced"><span class="tt">Max inventory (quote)</span> <input type="text" id="pmm_max_inventory" placeholder="= total amount"></label>
       </div>
     </div>
 
@@ -237,42 +252,8 @@
       </div>
     </div>
 
-    <div id="params_cj" style="display:none">
-      <div class="psec">CJ compound</div>
-      <div class="row2">
-        <label title="Take-profit per trade: sell everything once price is this far above entry, then re-enter with the new capital"><span class="tt">Target gain</span> <input type="text" id="cj_target" placeholder="3%"></label>
-        <label title="Optional: exit at a loss if price falls this far below entry. BLANK = no stop — the position is held until the target hits, however long (and deep) that gets"><span class="tt">Stop loss</span> <input type="text" id="cj_stop" placeholder="blank = none"></label>
-      </div>
-      <div class="row2">
-        <label title="When is a new entry allowed? always = re-enter the moment you're flat. trend = only while supertrend agrees with the direction. fvg = only when price has retraced into an unfilled fair value gap (a 3-candle imbalance acting as an entry zone). trend+fvg = both must agree — fewest trades, most selective entries"><span class="tt">Entry condition</span>
-          <select id="cj_entry">
-            <option value="always">always — re-enter immediately</option>
-            <option value="trend">trend agrees (supertrend)</option>
-            <option value="fvg">FVG retrace</option>
-            <option value="trend+fvg">trend + FVG retrace</option>
-          </select>
-        </label>
-        <label title="Futures only (spot cannot short). long/short = fixed side. auto = supertrend picks the side each trade: uptrend opens LONGS, downtrend opens SHORTS — profits either way the market trends, whipsaws in chop"><span class="tt">Direction</span>
-          <select id="cj_direction">
-            <option value="long">long only</option>
-            <option value="short">short only</option>
-            <option value="auto">auto — trend picks the side</option>
-          </select>
-        </label>
-      </div>
-      <div class="row2">
-        <label title="Seconds to stay flat after an exit before buying back in. 0 = re-enter immediately. (Spot mode only)"><span class="tt">Re-entry cooldown (s)</span> <input type="text" id="cj_cooldown" placeholder="0"></label>
-        <label title="Blank or 1 = spot demo. 2+ = FUTURES TESTNET with this leverage: target/stop stay as PnL on capital, so the needed price move shrinks to target/leverage — but so does the liquidation distance (~100%/leverage). Needs futures-testnet keys from testnet.binancefuture.com"><span class="tt">Leverage (futures)</span> <input type="text" id="cj_leverage" placeholder="blank = spot"></label>
-      </div>
-      <div class="hint">Uses "Total amount" as the starting capital, then always trades
-        100% of whatever the capital has become. With leverage set, trades run on the
-        <b>futures testnet</b> — save keys from
-        <a href="https://testnet.binancefuture.com" target="_blank">testnet.binancefuture.com</a>
-        (spot demo keys will not work) and watch positions in its trading UI.</div>
-    </div>
-
     <div class="checks" style="margin-top:12px">
-      <label title="Off: the bot only prints what it would do (safe rehearsal). On: orders are actually placed on your Binance demo account"><input type="checkbox" id="trade"> <span class="tt">place real orders on your demo account (off = dry-run)</span></label>
+      <label title="Off: the bot only prints what it would do (safe rehearsal). On: orders are actually placed on the selected exchange's demo environment"><input type="checkbox" id="trade"> <span class="tt" id="tradeLabel">place real orders on your demo account (off = dry-run)</span></label>
     </div>
     <div class="warn" id="tradeWarn">Real orders need saved credentials.</div>
   </div>
@@ -284,10 +265,14 @@
     <button id="stopBtn" class="danger" disabled title="Cancels all the bot's open orders, then prints the PnL and request reports">Stop</button>
     <div style="margin-top:10px">
       <button id="backtestBtn" style="margin-top:0" title="Replays real historical candles through the picked strategy with these exact parameters — simulated fills and fees, no orders placed, no keys needed. Results appear in the console">Backtest</button>
-      <button id="compareBtn" style="margin-top:0" title="Backtests ALL FOUR strategies simultaneously over the same candles, each with its current parameters from this page, and renders a PnL comparison table">Compare all</button>
+      <button id="compareBtn" style="margin-top:0" title="Backtests ALL THREE strategies simultaneously over the same candles, each with its current parameters from this page, and renders a PnL comparison table">Compare all</button>
       <label title="How many days of price history to replay" style="display:inline-flex;align-items:center;gap:5px;margin-top:0">
         <span class="tt">last</span>
         <input type="text" id="bt_days" value="30" style="width:44px;margin:0"> days
+      </label>
+      <label title="Fee per fill in the simulation. BLANK = the selected exchange's maker rate (binance 0.1%, gate spot 0.2%, gate futures -0.01% — a rebate you EARN). Negative values are rebates" style="display:inline-flex;align-items:center;gap:5px;margin-top:0">
+        <span class="tt">fee</span>
+        <input type="text" id="bt_fee" placeholder="auto" style="width:56px;margin:0">
       </label>
     </div>
     <div class="hint">Backtest answers "would these parameters have made money?" before you run them live.</div>
@@ -303,8 +288,8 @@
       <tbody></tbody>
     </table>
     <div class="hint" style="margin-top:6px">Each strategy ran independently over the
-      same candles with its parameters from this page (cj at 1x, long-only in
-      backtests). Directional, not exact &mdash; and <b>maker-strategy results
+      same candles with its parameters from this page.
+      Directional, not exact &mdash; and <b>maker-strategy results
       (pmm, grid) are upper bounds</b>: candle-based fills ignore queue position
       and one-sided flow, which inflates market-making PnL enormously. Compare
       strategies against each other with skepticism, not as forecasts.</div>
@@ -314,12 +299,13 @@
     <div id="console">waiting for the bot API...</div>
   </div>
   <div class="card" style="margin-bottom:0">
-    <h2>On the exchange &mdash; live from Binance
+    <h2><span id="exPanelTitle">On the exchange &mdash; live from Binance</span>
       <button id="exchangeRefresh" style="margin:0 0 0 8px;padding:2px 8px;font-size:11px">refresh</button>
     </h2>
-    <div class="hint" style="margin:0 0 8px">Queried directly from Binance's API
-      (order/trade IDs are Binance's own) &mdash; independent proof of what the bot did.</div>
+    <div class="hint" style="margin:0 0 8px">Queried directly from the exchange's API
+      (order/trade IDs are the exchange's own) &mdash; independent proof of what the bot did.</div>
     <div id="exBalances" class="hint">save credentials to enable</div>
+    <div id="exPosition" class="hint" style="display:none;margin-top:4px"></div>
     <div class="row2" style="margin-top:8px; align-items:start">
       <div>
         <div class="hint" style="font-weight:600">Open orders on the book</div>
@@ -339,16 +325,15 @@ const API = `http://${location.hostname}:8801`;
 const $ = id => document.getElementById(id);
 // persisted between visits — note: "duration" is deliberately NOT here, so the
 // bot always defaults to running until you press Stop
-const PARAM_IDS = ["symbol","grid_start","grid_end","grid_limit","grid_levels",
-                   "grid_max_open","pmm_spreads","pmm_refresh",
+const PARAM_IDS = ["exchange","leverage","symbol","grid_start","grid_end",
+                   "grid_limit","grid_levels","grid_max_open",
+                   "pmm_spreads","pmm_refresh","pmm_skew","pmm_max_inventory",
                    "st_length","st_multiplier","st_threshold",
-                   "cj_target","cj_stop","cj_cooldown","cj_leverage","cj_entry",
-                   "cj_direction","total_quote","interval"];
+                   "total_quote","interval","max_loss","bt_fee"];
 const STRATEGY_PARAM_IDS = {
   grid: ["grid_start","grid_end","grid_limit","grid_levels","grid_max_open"],
-  pmm: ["pmm_spreads","pmm_refresh"],
+  pmm: ["pmm_spreads","pmm_refresh","pmm_skew","pmm_max_inventory"],
   supertrend: ["st_length","st_multiplier","st_threshold"],
-  cj: ["cj_target","cj_stop","cj_cooldown","cj_leverage","cj_entry","cj_direction"],
 };
 
 function pickedStrategy() {
@@ -380,6 +365,57 @@ function persist() {
   for (const id of PARAM_IDS) out[id] = $(id).value;
   localStorage.setItem("gridbot-params", JSON.stringify(out));
 }
+
+// ------- exchange-dependent labels and warnings -------
+const EXCHANGE_UI = {
+  binance: {
+    title: "Grid Strike Bot — Binance Spot Demo",
+    watchHref: "https://demo.binance.com",
+    watchText: "watch on demo.binance.com ↗",
+    credsHelp: `Log into Binance, switch to
+      <a href="https://demo.binance.com" target="_blank">Demo Trading</a>, then
+      create a key in API Management. Keys are held in memory only &mdash;
+      never written to disk.`,
+    tradeLabel: "place real orders on your demo account (off = dry-run)",
+    exPanel: "On the exchange — live from Binance",
+  },
+  gate: {
+    title: "Grid Strike Bot — Gate.com Spot Testnet",
+    watchHref: "https://testnet.gate.com",
+    watchText: "watch on testnet.gate.com ↗",
+    credsHelp: `Log into <a href="https://www.gate.com" target="_blank">gate.com</a>
+      and create a key in <b>Testnet</b> API Key Management with spot trade
+      permission (testnet keys — live keys will not work). Keys are held in
+      memory only &mdash; never written to disk.`,
+    tradeLabel: "place real orders on your Gate testnet account (off = dry-run)",
+    exPanel: "On the exchange — live from Gate testnet",
+  },
+  gate_futures: {
+    title: "Grid Strike Bot — Gate.com Futures Testnet",
+    watchHref: "https://testnet.gate.com",
+    watchText: "watch on testnet.gate.com ↗",
+    credsHelp: `Log into <a href="https://www.gate.com" target="_blank">gate.com</a>
+      and create a key in <b>Testnet</b> API Key Management with futures trade
+      permission (testnet keys — live keys will not work). Keys are held in
+      memory only &mdash; never written to disk.`,
+    tradeLabel: "place real orders on your Gate futures testnet account (off = dry-run)",
+    exPanel: "On the exchange — live from Gate futures testnet",
+  },
+};
+function updateExchangeUI() {
+  const ex = $("exchange").value;
+  const ui = EXCHANGE_UI[ex] || EXCHANGE_UI.binance;
+  $("pageTitle").textContent = ui.title;
+  $("watchLink").href = ui.watchHref;
+  $("watchLink").textContent = ui.watchText;
+  $("credsHelp").innerHTML = ui.credsHelp;
+  $("tradeLabel").textContent = ui.tradeLabel;
+  $("exPanelTitle").textContent = ui.exPanel;
+  $("leverageRow").style.display = ex === "gate_futures" ? "" : "none";
+}
+$("exchange").onchange = () => { persist(); updateExchangeUI(); refreshExchange(); };
+updateExchangeUI();
+
 
 async function api(path, opts) {
   const resp = await fetch(API + path, opts);
@@ -464,10 +500,12 @@ async function pollLogs() {
 
 function gatherParams() {
   const picked = pickedStrategy();
-  const p = { strategies: [picked], trade: $("trade").checked };
+  const p = { strategies: [picked], trade: $("trade").checked,
+              exchange: $("exchange").value };
   // general params + only the picked strategy's own params
-  const ids = ["symbol","total_quote","interval","duration",
+  const ids = ["symbol","total_quote","interval","duration","max_loss",
                ...STRATEGY_PARAM_IDS[picked]];
+  if (p.exchange === "gate_futures") ids.push("leverage");
   for (const id of ids) { const v = $(id).value.trim(); if (v) p[id] = v; }
   return p;
 }
@@ -531,6 +569,7 @@ $("backtestBtn").onclick = () => withLoading($("backtestBtn"), async () => {
   persist();
   const p = gatherParams();
   p.days = $("bt_days").value.trim() || "30";
+  if ($("bt_fee").value.trim()) p.fee = $("bt_fee").value.trim();
   delete p.trade;
   const r = await post("/api/backtest", p);
   if (r.ok) {                       // spinner for the whole replay
@@ -541,15 +580,16 @@ $("backtestBtn").onclick = () => withLoading($("backtestBtn"), async () => {
 $("compareBtn").onclick = () => withLoading($("compareBtn"), async () => {
   persist();
   // every strategy with its current parameters, all in one simulation
-  const p = { strategies: ["grid", "pmm", "supertrend", "cj"],
-              days: $("bt_days").value.trim() || "30" };
+  const p = { strategies: ["grid", "pmm", "supertrend"],
+              days: $("bt_days").value.trim() || "30",
+              exchange: $("exchange").value };
+  if ($("bt_fee").value.trim()) p.fee = $("bt_fee").value.trim();
   const ids = ["symbol", "total_quote",
                ...[].concat(...Object.values(STRATEGY_PARAM_IDS))];
   for (const id of ids) {
     const el = $(id);
     if (el && el.value.trim()) p[id] = el.value.trim();
   }
-  delete p.cj_leverage; delete p.cj_direction;   // futures-only, not backtestable
   const r = await post("/api/backtest", p);
   if (r.ok) {
     await waitUntil(() => botRunning, 5000);
@@ -594,15 +634,39 @@ async function refreshExchange() {
   if (!apiUp) return;
   try {
     const sym = $("symbol").value.trim().toUpperCase() || "BTCUSDT";
-    const d = await api(`/api/exchange?symbol=${encodeURIComponent(sym)}`);
+    const d = await api(`/api/exchange?symbol=${encodeURIComponent(sym)}`
+                        + `&exchange=${encodeURIComponent($("exchange").value)}`);
     if (d.error) { $("exBalances").textContent = d.error; return; }
     if (d.total_usd !== undefined) {
       $("tAssets").textContent = "$" + d.total_usd.toLocaleString(undefined,
         {minimumFractionDigits: 2, maximumFractionDigits: 2});
       const dp = d.daily_pnl || 0;
       const cls = dp > 0.005 ? "pos" : dp < -0.005 ? "neg" : "";
-      $("tAssetsSub").innerHTML =
-        `today <span class="${cls}">${(dp >= 0 ? "+" : "") + dp.toFixed(2)} USD</span>`;
+      let sub = `today <span class="${cls}">${(dp >= 0 ? "+" : "") + dp.toFixed(2)} USD</span>`;
+      if (d.today_by_type) {
+        const NAMES = {pnl: "trading", fee: "fees", fund: "funding",
+                       dnw: "transfers", refr: "referral"};
+        const parts = Object.entries(d.today_by_type)
+          .filter(([, v]) => Math.abs(v) >= 0.005)
+          .map(([k, v]) => `${NAMES[k] || k} ${(v >= 0 ? "+" : "") + v.toFixed(2)}`);
+        if (parts.length) sub += ` · ${parts.join(" · ")}`;
+      }
+      $("tAssetsSub").innerHTML = sub;
+    }
+    const posEl = $("exPosition");
+    if (d.position) {
+      const p = d.position, sz = +p.size_base;
+      const up = +p.unrealised_pnl;
+      const upCls = up > 0.005 ? "pos" : up < -0.005 ? "neg" : "";
+      posEl.style.display = "";
+      posEl.innerHTML = `Open position: <span class="${sz > 0 ? "buy" : "sell"}">` +
+        `${sz > 0 ? "LONG" : "SHORT"} ${Math.abs(sz).toFixed(6)}</span>` +
+        ` @ ${(+p.entry_price).toFixed(2)} &middot; ` +
+        `uPnL <span class="${upCls}">${(up >= 0 ? "+" : "") + up.toFixed(2)}</span>` +
+        ` &middot; liq ${(+p.liq_price).toFixed(0)} &middot; ${p.leverage}x` +
+        ` <span style="color:var(--muted)">(not in Session PnL &mdash; may be from earlier sessions)</span>`;
+    } else {
+      posEl.style.display = "none";
     }
     $("exBalances").textContent = "Balances: " + (d.balances || [])
       .map(b => `${b.asset} ${(+b.free).toFixed(5)}${+b.locked ? ` (+${(+b.locked).toFixed(5)} in orders)` : ""}`)
