@@ -1,20 +1,22 @@
 "use client";
 
 // Cloud dashboard. Polls /api/bot/status (which reads Supabase) every few
-// seconds and queues actions as bot_commands rows for the VM agent. No raw
-// console here — outcomes surface in the Activity feed; full logs stay in
-// the bot_logs table for debugging.
+// seconds and queues actions as bot_commands rows for the VM agent. Bot
+// parameters live top-left; exchange, trading pair and API keys are on
+// /settings. Failures surface twice: per-action in the Activity feed, and a
+// persistent red banner when the bot process dies with an error.
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const POLL_MS = 3000;
 const HEARTBEAT_STALE_MS = 15_000;
 
-const EXCHANGES = [
-  ["gate_futures", "Gate.com — Futures Testnet"],
-  ["gate", "Gate.com — Spot Testnet"],
-  ["binance", "Binance — Spot Demo"],
-];
+const EXCHANGE_LABELS = {
+  gate_futures: "Gate Futures Testnet",
+  gate: "Gate Spot Testnet",
+  binance: "Binance Spot Demo",
+};
 
 const STRATEGIES = [
   ["grid", "Grid", "buy low / sell high across a price ladder"],
@@ -22,21 +24,20 @@ const STRATEGIES = [
   ["supertrend", "Supertrend", "follows the trend, exits on reversal"],
 ];
 
-// field key -> [label, placeholder], grouped by the strategy that uses them
 const PARAM_GROUPS = [
-  ["grid", "Grid settings", [
+  ["grid", [
     ["grid_start", "Lower price (or -3%)", "-3%"],
     ["grid_end", "Upper price (or 3%)", "3%"],
     ["grid_levels", "Number of levels", "10"],
     ["grid_max_open", "Max open orders", ""],
   ]],
-  ["pmm", "Market making settings", [
-    ["pmm_spreads", "Spreads per side", "0.05%, 0.15%"],
+  ["pmm", [
+    ["pmm_spreads", "Spreads per side (%)", "0.05%, 0.15%"],
     ["pmm_refresh", "Refresh every (s)", "15"],
     ["pmm_skew", "Inventory skew (0–1)", "0.5"],
     ["pmm_max_inventory", "Max inventory (base)", ""],
   ]],
-  ["supertrend", "Supertrend settings", [
+  ["supertrend", [
     ["st_length", "ATR length", "10"],
     ["st_multiplier", "ATR multiplier", "3"],
     ["st_threshold", "Entry threshold", "0.1%"],
@@ -50,7 +51,7 @@ const SHARED_FIELDS = [
   ["days", "Backtest window (days)", "7"],
 ];
 
-const ALL_FIELDS = [...PARAM_GROUPS.flatMap(([, , f]) => f), ...SHARED_FIELDS];
+const ALL_FIELDS = [...PARAM_GROUPS.flatMap(([, f]) => f), ...SHARED_FIELDS];
 
 const ACTION_LABELS = {
   start: "Start", stop: "Stop", check: "Connection check", backtest: "Backtest",
@@ -80,11 +81,7 @@ export default function Dashboard() {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(null);
   const [notice, setNotice] = useState(null);
-  const [form, setForm] = useState({
-    exchange: "gate_futures", symbol: "BTCUSDT",
-    strategy: "pmm", params: {},
-  });
-  const [creds, setCreds] = useState({ api_key: "", api_secret: "" });
+  const [form, setForm] = useState({ strategy: "pmm", params: {} });
   const hydrated = useRef(false);
 
   const poll = useCallback(async () => {
@@ -97,8 +94,6 @@ export default function Dashboard() {
         hydrated.current = true;
         const p = data.settings.params || {};
         setForm({
-          exchange: data.settings.exchange || "gate_futures",
-          symbol: data.settings.symbol || "BTCUSDT",
           strategy: (Array.isArray(p.strategies) && p.strategies[0]) || "pmm",
           params: Object.fromEntries(
             ALL_FIELDS.map(([k]) => [k, p[k] != null ? String(p[k]) : ""])),
@@ -140,8 +135,7 @@ export default function Dashboard() {
   }
 
   function formParams(extra = {}) {
-    const params = { symbol: form.symbol, exchange: form.exchange,
-                     strategies: [form.strategy] };
+    const params = { strategies: [form.strategy] };
     for (const [k] of ALL_FIELDS) {
       const v = (form.params[k] || "").trim();
       if (v) params[k] = v;
@@ -150,15 +144,14 @@ export default function Dashboard() {
   }
 
   const saveSettings = () => post("/api/bot/settings", {
-    exchange: form.exchange, symbol: form.symbol,
     params: { strategies: [form.strategy],
               ...Object.fromEntries(Object.entries(form.params)
                 .filter(([, v]) => (v || "").trim() !== "")) },
-  }, "Save settings");
+  }, "Save parameters");
 
   const sendCommand = (action, extra) => {
     if (action === "start" && extra?.trade &&
-        !window.confirm(`Start LIVE trading ${form.symbol} on ${form.exchange}?\n` +
+        !window.confirm(`Start LIVE trading ${symbol} on ${exchangeLabel}?\n` +
                         "The bot will place real orders on the exchange.")) {
       return;
     }
@@ -167,15 +160,13 @@ export default function Dashboard() {
                 ACTION_LABELS[action]);
   };
 
-  const saveCreds = async () => {
-    const ok = await post("/api/bot/credentials",
-      { exchange: form.exchange, ...creds }, "Save API keys");
-    if (ok) setCreds({ api_key: "", api_secret: "" });
-  };
-
   // ------------------------------------------------------------------ derived
 
   const st = status?.state;
+  const settings = status?.settings;
+  const symbol = settings?.symbol || "—";
+  const exchangeLabel = EXCHANGE_LABELS[settings?.exchange] || settings?.exchange || "—";
+  const futures = (settings?.exchange || "").includes("futures");
   const summary = st?.exchange_summary;
   const stats = st?.stats;
   const backtest = st?.backtest;
@@ -185,10 +176,10 @@ export default function Dashboard() {
   const running = agentOnline && st?.running;
   const inFlight = (status?.queue || []).length > 0;
   const position = summary?.position;
-  const credFamily = form.exchange.startsWith("gate") ? "gate" : "binance";
+  const credFamily = (settings?.exchange || "").startsWith("gate") ? "gate" : "binance";
   const savedCred = status?.credentials?.find((c) => c.exchange === credFamily);
-  const futures = form.exchange.includes("futures");
   const actionsReady = configured && agentOnline && !busy && !inFlight;
+  const lastExit = !running ? st?.last_exit : null;
 
   const setupSteps = [
     ["Supabase connected", !!configured],
@@ -226,7 +217,7 @@ export default function Dashboard() {
      position ? `entry ${position.entry_price ?? "?"}` : "futures position, if any"],
     ["Bot",
      <><span className={`dot ${running ? "on" : agentOnline ? "" : "err"}`} />{botLabel}</>,
-     agentOnline ? `${stats?.open_orders ?? 0} open orders on ${form.symbol}`
+     agentOnline ? `${stats?.open_orders ?? 0} open orders on ${symbol}`
                  : "waiting for the VM heartbeat"],
   ];
 
@@ -250,6 +241,15 @@ export default function Dashboard() {
           in the Vercel project env, and run bot/supabase_schema.sql once.
         </div>
       )}
+      {lastExit && (
+        <div className="errbanner">
+          <b>The bot stopped with an error</b> (exit code {lastExit.code}).
+          {" "}Last output: <code>{lastExit.tail || "no output captured"}</code>
+          {" "}— fix the cause (often the trading pair or API keys in{" "}
+          <Link href="/settings" style={{ color: "inherit" }}>Settings</Link>)
+          and start again.
+        </div>
+      )}
       <header className="topbar">
         <h1>Grid Strike Bot</h1>
         <span className={`badge ${running ? "on" : ""}`}>
@@ -261,7 +261,9 @@ export default function Dashboard() {
             working: {status.queue.map((q) => ACTION_LABELS[q.action] || q.action).join(", ")}
           </span>
         )}
-        <form action="/api/auth/logout" method="post" style={{ marginLeft: "auto" }}>
+        <span style={{ marginLeft: "auto" }} />
+        <Link className="navlink" href="/settings">Settings</Link>
+        <form action="/api/auth/logout" method="post">
           <button type="submit" style={{ margin: 0, padding: "4px 12px" }}>
             Sign out
           </button>
@@ -291,44 +293,13 @@ export default function Dashboard() {
       <main className="grid">
         <div>
           <section className="card">
-            <h2>Exchange &amp; API keys</h2>
-            <label className="field">
-              Exchange
-              <select value={form.exchange}
-                      onChange={(e) => setForm((f) => ({ ...f, exchange: e.target.value }))}>
-                {EXCHANGES.map(([v, label]) => (
-                  <option key={v} value={v}>{label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              Trading pair
-              <input type="text" value={form.symbol}
-                     onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))} />
-            </label>
-            <label className="field">
-              API key {savedCred && <span className="chip ok">saved {savedCred.api_key_masked}</span>}
-              <input type="text" value={creds.api_key}
-                     placeholder={savedCred ? "paste a new key to replace it" : "paste your API key"}
-                     onChange={(e) => setCreds((c) => ({ ...c, api_key: e.target.value }))} />
-            </label>
-            <label className="field">
-              API secret
-              <input type="password" value={creds.api_secret} placeholder="API secret"
-                     onChange={(e) => setCreds((c) => ({ ...c, api_secret: e.target.value }))} />
-            </label>
-            <button onClick={saveCreds}
-                    disabled={!!busy || !creds.api_key || !creds.api_secret}>
-              Save API keys
-            </button>
-            <div className="hint">
-              Keys are stored server-side and only ever read by your VM —
-              they never come back to the browser.
+            <h2>Bot parameters</h2>
+            <div className="hint" style={{ marginTop: 0 }}>
+              Trading <b>{symbol}</b> on <b>{exchangeLabel}</b>
+              {savedCred ? "" : " — no API keys saved"} ·{" "}
+              <Link className="navlink" href="/settings">change in Settings</Link>
             </div>
-          </section>
 
-          <section className="card">
-            <h2>Strategy</h2>
             <div className="seg">
               {STRATEGIES.map(([key, label]) => (
                 <button key={key} type="button"
@@ -342,7 +313,7 @@ export default function Dashboard() {
 
             {activeGroup && (
               <div className="row2">
-                {activeGroup[2].map(([k, label, placeholder]) => (
+                {activeGroup[1].map(([k, label, placeholder]) => (
                   <label className="field" key={k}>
                     {label}
                     <input type="text" value={form.params[k] || ""}
@@ -384,11 +355,7 @@ export default function Dashboard() {
             </div>
             <div className="actions secondary">
               <button disabled={!!busy || !configured} onClick={saveSettings}>
-                Save settings
-              </button>
-              <button disabled={!actionsReady || running || !savedCred}
-                      onClick={() => sendCommand("check")}>
-                Test connection
+                Save parameters
               </button>
               <button disabled={!actionsReady || running}
                       onClick={() => sendCommand("backtest")}>
@@ -435,7 +402,8 @@ export default function Dashboard() {
               <div className="hint">
                 {savedCred
                   ? "Waiting for the first snapshot from your VM (updates every ~30 s)."
-                  : "Save your API keys to see balances, orders and positions here."}
+                  : <>Save your API keys in <Link className="navlink" href="/settings">Settings</Link> to
+                     see balances, orders and positions here.</>}
               </div>
             ) : summary.error ? (
               <div className="error">{summary.error}</div>

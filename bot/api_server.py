@@ -125,6 +125,7 @@ class BotManager:
         self.api_secret = None
         self.bot_stats = None       # last @STATS payload from the bot
         self.backtest_result = None  # last @BACKTEST payload (comparison table)
+        self.last_exit_code = None  # how the previous bot process ended
 
     # ---------------------------------------------------------------- logging
 
@@ -257,6 +258,7 @@ class BotManager:
                 "credentials_set": bool(self.api_key and self.api_secret),
                 "stats": self.bot_stats,
                 "backtest": self.backtest_result,
+                "last_exit_code": self.last_exit_code,
             }
 
     def start(self, params, check=False, backtest=False):
@@ -355,6 +357,7 @@ class BotManager:
                 return False, f"failed to launch bot: {e}"
             self.started_at = time.time()
             self.bot_stats = None       # fresh session, fresh numbers
+            self.last_exit_code = None
             proc = self.proc
         self.log(f"[api] started bot pid={proc.pid} mode={self.mode}")
         threading.Thread(target=self._pump, args=(proc,), daemon=True).start()
@@ -380,6 +383,7 @@ class BotManager:
         proc.wait()
         self.log(f"[api] bot exited with code {proc.returncode}")
         with self.lock:
+            self.last_exit_code = proc.returncode
             if self.proc is proc:
                 self.proc = None
                 self.mode = None

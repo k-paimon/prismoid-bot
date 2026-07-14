@@ -154,3 +154,27 @@ button.danger { color: var(--danger); border-color: #e4b6b2; }
 }
 .checklist .step { color: var(--muted); }
 .checklist .step.done { color: var(--accent); }
+
+.errbanner {
+  background: #f9e3e1; border-bottom: 1px solid #ecbcb7; color: var(--danger);
+  padding: 8px 20px; font-size: 13px;
+}
+.errbanner code {
+  font: 12px/1.5 Consolas, Menlo, monospace; overflow-wrap: anywhere;
+}
+
+a.navlink {
+  color: var(--muted); font-size: 13px; font-weight: 600;
+  text-decoration: none;
+}
+a.navlink:hover { color: var(--ink); text-decoration: underline; }
+
+main.narrow { max-width: 640px; margin: 0 auto; padding: 16px 20px; }
+.keyrow {
+  display: flex; align-items: center; gap: 10px; padding: 8px 0;
+  border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.keyrow:last-child { border-bottom: none; }
+.keyrow .exname { font-weight: 600; min-width: 70px; text-transform: capitalize; }
+.keyrow .when { margin-left: auto; color: var(--muted); font-size: 11px; }
+.keyrow button { margin: 0; padding: 3px 10px; font-size: 12px; }

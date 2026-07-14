@@ -46,9 +46,12 @@ create table if not exists bot_state (
   backtest          jsonb,          -- last @BACKTEST comparison table
   exchange_summary  jsonb,          -- balances / orders / position snapshot
   log_next          bigint not null default 0,
+  last_exit         jsonb,          -- {code, tail} when the bot died nonzero
   heartbeat_at      timestamptz,
   agent_version     text
 );
+-- upgrade for databases created before this column existed
+alter table bot_state add column if not exists last_exit jsonb;
 
 -- Console feed. seq is the BotManager line index, so pushes are idempotent.
 -- The agent prunes old rows; the webapp polls "seq >= since".

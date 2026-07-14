@@ -32,11 +32,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from api_server import BotManager          # noqa: E402
 from supabase_client import Supabase, SupabaseError  # noqa: E402
 
-AGENT_VERSION = "0.1"
+AGENT_VERSION = "0.2"
 LOG_RETAIN = 5000          # keep this many console lines in bot_logs
 LOG_BATCH = 500            # rows per insert
 SUMMARY_EVERY_S = 30       # exchange snapshot cadence (several REST calls)
 PRUNE_EVERY_S = 300
+START_GRACE_S = 5          # a start that dies within this window failed
+CHECK_WAIT_S = 30          # how long to wait for a connection check verdict
 
 
 def iso(ts=None):
@@ -74,6 +76,31 @@ class CloudAgent:
 
     # --------------------------------------------------------------- commands
 
+    def console_tail(self, n=4):
+        """The last few meaningful bot lines — the human-readable 'why'."""
+        st = self.manager.status()
+        res = self.manager.get_logs(max(0, st["log_count"] - 15))
+        lines = [ln.strip() for ln in res["lines"]
+                 if ln.strip() and not ln.startswith(("[agent]", "[api]"))]
+        return " | ".join(lines[-n:])
+
+    def watch_launch(self, action, ok, msg):
+        """A start that dies immediately is a failure, not a success — report
+        it with the bot's own words. A check is waited out for its verdict."""
+        if not ok or action not in ("start", "check"):
+            return ok, msg
+        deadline = time.time() + (CHECK_WAIT_S if action == "check"
+                                  else START_GRACE_S)
+        while time.time() < deadline and self.manager.status()["running"]:
+            time.sleep(0.5)
+        st = self.manager.status()
+        if st["running"]:               # survived the grace window
+            return ok, msg
+        tail = self.console_tail() or "no output"
+        if action == "check":
+            return st["last_exit_code"] == 0, tail
+        return False, f"bot exited right after start: {tail}"
+
     def handle_commands(self):
         pending = self.sb.select("bot_commands",
                                  "status=eq.pending&order=id.asc&limit=5")
@@ -98,6 +125,7 @@ class CloudAgent:
                     ok, msg = self.manager.start(merged,
                                                  check=(action == "check"),
                                                  backtest=(action == "backtest"))
+                    ok, msg = self.watch_launch(action, ok, msg)
             except Exception as e:      # a bad command must not kill the agent
                 ok, msg = False, f"{type(e).__name__}: {e}"
             self.manager.log(f"[agent] command #{cmd['id']} {action}: {msg}")
@@ -125,6 +153,12 @@ class CloudAgent:
         st = self.manager.status()
         with self.summary_lock:
             summary = self.summary
+        # surface an unexpected death (nonzero exit while stopped) so the
+        # dashboard can show a persistent "bot stopped" banner with the cause
+        last_exit = None
+        if not st["running"] and st.get("last_exit_code") not in (None, 0):
+            last_exit = {"code": st["last_exit_code"],
+                         "tail": self.console_tail()}
         self.sb.upsert("bot_state", {
             "id": 1,
             "running": st["running"],
@@ -137,6 +171,7 @@ class CloudAgent:
             "backtest": st["backtest"],
             "exchange_summary": summary,
             "log_next": self.pushed_seq,
+            "last_exit": last_exit,
             "heartbeat_at": iso(),
             "agent_version": AGENT_VERSION,
         })
