@@ -155,6 +155,30 @@ button.danger { color: var(--danger); border-color: #e4b6b2; }
 .checklist .step { color: var(--muted); }
 .checklist .step.done { color: var(--accent); }
 
+.tickline {
+  font-size: 13px; font-weight: 600; padding: 6px 10px; margin-bottom: 8px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+}
+.feed {
+  list-style: none; margin: 0; padding: 0;
+  max-height: 320px; overflow-y: auto;
+}
+.feed li {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.feed li:last-child { border-bottom: none; }
+.feed .ic { flex: none; width: 20px; text-align: center; font-size: 11px; }
+.feed .msg { overflow-wrap: anywhere; }
+.feed li.info .msg, .feed li.cancel .msg { color: var(--muted); }
+.feed li.error .msg { color: var(--danger); }
+.feed li.warn .msg { color: var(--dev); }
+.feed li.fill .msg { color: var(--accent); font-weight: 600; }
+.feed .t {
+  margin-left: auto; flex: none; color: var(--muted); font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .errbanner {
   background: #f9e3e1; border-bottom: 1px solid #ecbcb7; color: var(--danger);
   padding: 8px 20px; font-size: 13px;

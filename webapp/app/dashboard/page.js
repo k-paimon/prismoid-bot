@@ -10,6 +10,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const POLL_MS = 3000;
+const FEED_POLL_MS = 2000;
+const FEED_MAX = 50;
 const HEARTBEAT_STALE_MS = 15_000;
 
 const EXCHANGE_LABELS = {
@@ -77,12 +79,103 @@ function timeAgo(iso) {
   return `${Math.floor(s / 86400)} d ago`;
 }
 
+// ---- console line -> friendly live-feed event ----------------------------
+// kinds: buy, sell, fill, cancel, warn, error, info, tick (status line)
+
+const FEED_ICONS = {
+  buy: "🟢", sell: "🔴", fill: "✅", cancel: "✖",
+  warn: "⚠️", error: "❌", info: "•",
+};
+
+const SKIP_RE = [
+  /^\[agent\]/, /^=+$/, /^-+$/, /^REQUEST REPORT/, /^endpoint\s/,
+  /^(GET|POST|DELETE) \//, /^total requests/, /^local weight/,
+  /^exchange-reported/, /^order count/, /^rate limits/, /^\s*$/,
+];
+
+function orderBits(dictish) {
+  const side = /'side': '(\w+)'/.exec(dictish)?.[1];
+  const qty = /'quantity': '([^']+)'/.exec(dictish)?.[1];
+  const price = /'price': '([^']+)'/.exec(dictish)?.[1];
+  return { side, qty, price };
+}
+
+function friendly(raw) {
+  const line = raw.trim();
+  if (SKIP_RE.some((re) => re.test(line))) return null;
+  let m;
+
+  if ((m = line.match(/^\[\d\d:\d\d:\d\d\] mid=([\d.]+) open=(\d+).*?PnL ([+-][\d.]+) (\w+)/))) {
+    return { kind: "tick",
+             text: `Price ${m[1]} · ${m[2]} open order${m[2] === "1" ? "" : "s"} · session PnL ${m[3]} ${m[4]}` };
+  }
+  if ((m = line.match(/^PLACED \[([^\]]+)\] \S+ (BUY|SELL) (\S+) @ (\S+)/))) {
+    return { kind: m[2] === "BUY" ? "buy" : "sell",
+             text: `${m[2] === "BUY" ? "Buy" : "Sell"} order placed — ${m[3]} @ ${m[4]} (${m[1]})` };
+  }
+  if ((m = line.match(/^FILL \[([^\]]+)\] \S+ \((?:market, )?([\d.]+)(?: @ ([\d.]+))?/))) {
+    return { kind: "fill",
+             text: `Order filled — ${m[2]}${m[3] ? ` @ ${m[3]}` : ""} (${m[1]})` };
+  }
+  if ((m = line.match(/^REJECTED \[([^\]]+)\] [^:]+: (.+)/))) {
+    return { kind: "error", text: `Order rejected (${m[1]}): ${m[2]}` };
+  }
+  if ((m = line.match(/^\[dry-run\] PLACE \[([^\]]+)\] (.+)/))) {
+    const o = orderBits(m[2]);
+    return { kind: o.side === "SELL" ? "sell" : "buy",
+             text: `Practice ${o.side === "SELL" ? "sell" : "buy"} order — ${o.qty ?? "?"} @ ${o.price ?? "market"} (${m[1]})` };
+  }
+  if (/^\[dry-run\] CANCEL /.test(line)) {
+    return { kind: "cancel", text: "Practice order cancelled" };
+  }
+  if ((m = line.match(/^cancel (\S+) failed: (.+)/))) {
+    return { kind: "warn", text: `Could not cancel an order: ${m[2]}` };
+  }
+  if ((m = line.match(/^cancelling (\d+) open orders/))) {
+    return { kind: "cancel", text: `Cancelling ${m[1]} open order${m[1] === "1" ? "" : "s"}` };
+  }
+  if ((m = line.match(/^\[api\] started bot pid=\d+ mode=(.+)/))) {
+    return { kind: "info", text: `Bot started — ${m[1]}` };
+  }
+  if ((m = line.match(/^\[api\] bot exited with code (\d+)/))) {
+    return m[1] === "0" ? { kind: "info", text: "Bot stopped" }
+      : { kind: "error", text: `Bot stopped with an error (exit code ${m[1]})` };
+  }
+  if (/^\[api\] stop requested/.test(line) || line === "stop requested" ||
+      line === "stopped by user") {
+    return { kind: "info", text: "Stop requested — cancelling open orders first" };
+  }
+  if ((m = line.match(/^KILL SWITCH: (.+?) — cancelling/))) {
+    return { kind: "error", text: `Kill switch: ${m[1]} — cancelling everything and stopping` };
+  }
+  if ((m = line.match(/^FATAL: (.+)/))) {
+    return { kind: "error", text: `Fatal error: ${m[1]}` };
+  }
+  if ((m = line.match(/failed: (.+)/))) {
+    return { kind: "error", text: line };
+  }
+  if (/^(NOTE:|leverage \d)/.test(line)) {
+    return { kind: "warn", text: line };
+  }
+  if (/^tick error/.test(line)) {
+    return { kind: "warn", text: `Hiccup, continuing: ${line.replace(/^tick error \(continuing\): /, "")}` };
+  }
+  if (/^placement cap/.test(line)) {
+    return { kind: "info", text: "Placement cap reached this tick — the rest waits for the next one" };
+  }
+  // anything unrecognized still shows, as a plain gray note
+  return { kind: "info", text: line.length > 140 ? line.slice(0, 140) + "…" : line };
+}
+
 export default function Dashboard() {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(null);
   const [notice, setNotice] = useState(null);
   const [form, setForm] = useState({ strategy: "pmm", params: {} });
+  const [feed, setFeed] = useState([]);       // friendly events, newest first
+  const [tick, setTick] = useState(null);     // latest bot status line
   const hydrated = useRef(false);
+  const feedCursor = useRef(0);
 
   const poll = useCallback(async () => {
     try {
@@ -90,6 +183,11 @@ export default function Dashboard() {
       if (res.status === 401) { window.location.href = "/login"; return; }
       const data = await res.json();
       setStatus(data);
+      if (data.state && data.state.log_next < feedCursor.current) {
+        feedCursor.current = 0;                // agent restarted: fresh feed
+        setFeed([]);
+        setTick(null);
+      }
       if (!hydrated.current && data.settings) {
         hydrated.current = true;
         const p = data.settings.params || {};
@@ -109,6 +207,37 @@ export default function Dashboard() {
     const t = setInterval(poll, POLL_MS);
     return () => clearInterval(t);
   }, [poll]);
+
+  const pollFeed = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/bot/logs?since=${feedCursor.current}`,
+                              { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.lines?.length) return;
+      feedCursor.current = data.next;
+      const events = [];
+      let latestTick = null;
+      for (const row of data.lines) {
+        const f = friendly(row.line);
+        if (!f) continue;
+        if (f.kind === "tick") { latestTick = { ...f, at: row.at }; continue; }
+        events.push({ seq: row.seq, at: row.at, ...f });
+      }
+      if (latestTick) setTick(latestTick);
+      if (events.length) {
+        setFeed((prev) => [...events.reverse(), ...prev].slice(0, FEED_MAX));
+      }
+    } catch {
+      /* transient poll failure — the next tick retries */
+    }
+  }, []);
+
+  useEffect(() => {
+    pollFeed();
+    const t = setInterval(pollFeed, FEED_POLL_MS);
+    return () => clearInterval(t);
+  }, [pollFeed]);
 
   async function post(url, body, label) {
     setBusy(label);
@@ -373,6 +502,37 @@ export default function Dashboard() {
         </div>
 
         <div>
+          <section className="card">
+            <h2>Live feed</h2>
+            {tick && (
+              <div className="tickline">
+                <span className="dot on" /> {tick.text}
+                <span className="when" style={{ float: "right", color: "var(--muted)", fontSize: 11 }}>
+                  {timeAgo(tick.at)}
+                </span>
+              </div>
+            )}
+            {!feed.length ? (
+              <div className="hint">
+                {running
+                  ? "Watching the bot — order activity will appear here as it happens."
+                  : "Quiet for now — start the bot and every order it places, fills or cancels shows up here in plain words."}
+              </div>
+            ) : (
+              <ul className="feed">
+                {feed.map((e) => (
+                  <li key={e.seq} className={e.kind}>
+                    <span className="ic">{FEED_ICONS[e.kind] || "•"}</span>
+                    <span className="msg">{e.text}</span>
+                    <span className="t">
+                      {e.at ? new Date(e.at).toLocaleTimeString() : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="card">
             <h2>Activity</h2>
             {!(status?.recent || []).length ? (
