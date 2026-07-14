@@ -112,6 +112,8 @@ class CloudAgent:
         res = self.manager.get_logs(self.pushed_seq)
         lines = res["lines"]
         if lines:
+            for ln in lines:        # mirror the console to stdout (nohup log /
+                print(ln)          # journalctl); Supabase gets the same lines
             start = res["next"] - len(lines)
             rows = [{"seq": start + i, "line": ln}
                     for i, ln in enumerate(lines)]
