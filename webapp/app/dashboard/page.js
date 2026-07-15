@@ -50,6 +50,7 @@ const SHARED_FIELDS = [
   ["total_quote", "Budget (quote currency)", "1000"],
   ["max_loss", "Stop after losing", "50"],
   ["leverage", "Leverage (futures only)", "3"],
+  ["interval", "Tick interval (s)", "10"],
   ["days", "Backtest window (days)", "7"],
 ];
 
