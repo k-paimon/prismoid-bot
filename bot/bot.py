@@ -666,6 +666,12 @@ def build_strategies(args):
             spreads.append(value)
         if not spreads:
             sys.exit("--pmm-spreads: need at least one spread, e.g. 0.1%,0.3%")
+        if args.pmm_refresh < args.interval * 2:
+            print(f"NOTE: pmm refresh ({args.pmm_refresh:g}s) is under twice the "
+                  f"tick interval ({args.interval:g}s) — every quote goes stale "
+                  f"each tick and only one side rests at a time (a cancelled "
+                  f"order is re-placed one tick later); set refresh to "
+                  f">= {args.interval * 2:g}s to keep both quotes on the book")
         chosen["PMM"] = PMMSimple(buy_spreads=spreads, sell_spreads=spreads,
                                   total_amount_quote=args.total_quote,
                                   executor_refresh_time=args.pmm_refresh,
