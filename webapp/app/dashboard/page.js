@@ -35,7 +35,7 @@ const PARAM_GROUPS = [
   ]],
   ["pmm", [
     ["pmm_spreads", "Spreads per side (%)", "0.05%, 0.15%"],
-    ["pmm_refresh", "Refresh every (s)", "15"],
+    ["pmm_refresh", "Refresh every (s, min 2)", "15"],
     ["pmm_skew", "Inventory skew (0–1)", "0.5"],
     ["pmm_max_inventory", "Max inventory (base)", ""],
   ]],
@@ -50,7 +50,6 @@ const SHARED_FIELDS = [
   ["total_quote", "Budget (quote currency)", "1000"],
   ["max_loss", "Stop after losing", "50"],
   ["leverage", "Leverage (futures only)", "3"],
-  ["interval", "Tick interval (s)", "10"],
   ["days", "Backtest window (days)", "7"],
 ];
 

@@ -697,7 +697,7 @@ def main():
                    help="connection + request-cost check, then exit")
     p.add_argument("--trade", action="store_true",
                    help="actually place orders (demo account only; default is dry-run)")
-    p.add_argument("--interval", type=float, default=10, help="tick seconds")
+    p.add_argument("--interval", type=float, default=1, help="tick seconds")
     p.add_argument("--duration", type=float, default=None,
                    help="stop after N seconds and print reports")
     p.add_argument("--keep-orders", action="store_true",
